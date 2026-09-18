@@ -4,3 +4,4 @@ __pycache__/
 jobs/
 starter/jobs/
 .env
+.env.op
