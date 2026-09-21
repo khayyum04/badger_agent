@@ -1,6 +1,6 @@
 # Phase 0: Establish context-management baseline
 
-Status: proposed — **spec incomplete**
+Spec: draft, incomplete. Phase status lives only in [`../roadmap.md`](../roadmap.md).
 Depends on: —
 Design: [`../design.md`](../design.md) §2, §29, §30 (variant A)
 Roadmap: [`../roadmap.md`](../roadmap.md)
@@ -18,11 +18,6 @@ compared against. No agent behavior changes in this phase.
 - **Price the tokens:** convert baseline totals into leaderboard-score terms (`0.01 × tokens / 1M`, extrapolated to 89 tasks) so we know what a given token reduction is actually worth. Gate G2 uses this number.
 - Write down the measurement protocol so it can be re-run identically after each phase.
 
-## Out of scope
-
-- Any change under `starter/agent/`.
-- Building the rolling-window variant (that needs Phase 1).
-
 ## Open questions
 
 - Which task set: the 10-task sample, the public subset (currently 3 placeholders), or both?
@@ -32,12 +27,19 @@ compared against. No agent behavior changes in this phase.
 - Where do results live so later phases can diff against them (committed summary vs. `jobs/` only)?
 - Can `starter/scripts/build_dashboard.py` already produce the per-turn context curve, or is a script needed?
 
+## Interfaces and handoff
+
+- **Provides:** the measurement command and baseline numbers (ledger row "Measurement command + baseline numbers"). Every later phase re-runs it.
+- **Reuses:** the existing `starter/scripts/` (`run_baseline.sh`, `run_subset.sh`, `build_dashboard.py`). Extend them; do not write a separate harness.
+- **Handoff:** fill `handoff.md` → *Measurement protocol* (command, task set, repeats, token-counting method, where results live).
+
 ## Exit criteria (draft)
 
 - Baseline numbers exist for the chosen task set: completion rate, tokens, turns, max context.
 - The protocol is documented well enough that someone else could reproduce it.
 - We know whether context growth causes failures (context overflow, lost details) or only cost.
 - The baseline token cost is expressed as a score penalty, so token savings can be compared with completion-rate changes on the same scale.
+- `handoff.md` updated per `CLAUDE.md` › Finishing a session.
 
 ## Tests
 

@@ -1,6 +1,6 @@
 # Phase 2: Add state-free loop controls
 
-Status: proposed — **spec incomplete**
+Spec: draft, incomplete. Phase status lives only in [`../roadmap.md`](../roadmap.md).
 Depends on: Phase 1
 Design: [`../design.md`](../design.md) §25 (turn/context feedback only), §26 (signals computable from events alone), §29
 Roadmap: [`../roadmap.md`](../roadmap.md)
@@ -34,10 +34,17 @@ not depend on compaction, so they come before it (DEC-006).
 - Do warnings change behavior for the better, or does the model ignore or over-obey them? Needs an on/off measurement.
 - Where do messages sit in active context (last user turn vs. appended to the observation)?
 
+## Interfaces and handoff
+
+- **Provides:** `action_may_modify_state`, repeat / consecutive-read-only detectors, loop-feedback message builders.
+- **Reuses:** Phase 1's events, the `build_active_context` feedback slot (no second injection path), the telemetry writer, config flags, and test fakes. Supersedes the generic `NUDGE_MESSAGE`.
+- **Handoff:** record the classifier's final name, module, and known false-positive/negative behavior. Phase 4 depends on it.
+
 ## Exit criteria (draft)
 
 - Repeated-command and consecutive-read-only counts are measured per run and drop vs. Phase 1 on long tasks.
 - No completion-rate regression vs. Phase 1; controls are individually switchable.
+- `handoff.md` updated per `CLAUDE.md` › Finishing a session.
 
 ## Tests (draft)
 

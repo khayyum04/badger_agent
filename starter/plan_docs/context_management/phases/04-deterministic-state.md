@@ -1,6 +1,6 @@
 # Phase 4: Add deterministic task state and completion guard v1
 
-Status: proposed — **spec incomplete**
+Spec: draft, incomplete. Phase status lives only in [`../roadmap.md`](../roadmap.md).
 Depends on: Phase 1, Phase 2 (Phase 3 recommended)
 Design: [`../design.md`](../design.md) §10 (deterministic subset), §19 (conservative flag), §20, §21, §23, §27 (v1), §33 invariants 6, 7, 14
 Roadmap: [`../roadmap.md`](../roadmap.md)
@@ -33,12 +33,19 @@ failure in exact detail, and block the most obviously premature `TASK_COMPLETE`.
 - Rendering format (JSON vs. prose) and budget (design suggests 2–6K for full state; this subset should be much smaller).
 - Which §10 fields are truly derivable deterministically, and is the resulting state useful enough to justify its tokens?
 
+## Interfaces and handoff
+
+- **Provides:** `TaskState` and its deterministic records, `deterministically_update_state`, stale flag + invalidation v1, `validate_completion` v1, the state renderer.
+- **Reuses:** Phase 2's classifier for the stale flag, Phase 3's failure-preview extractor for the current-failure record, Phase 1's `build_active_context` state slot, telemetry writer, flags, and test fakes.
+- **Handoff:** record which `TaskState` fields exist so Phase 5 extends them instead of introducing another state type.
+
 ## Exit criteria (draft)
 
 - The latest unresolved failure stays available in actionable detail through window eviction.
 - The agent cannot complete immediately after an unverified state-changing command.
 - The guard cannot deadlock a run and shows no completion-rate regression vs. Phase 3.
 - **Gate G2 measurement:** Tier A agent vs. Phase 0, per roadmap.
+- `handoff.md` updated per `CLAUDE.md` › Finishing a session.
 
 ## Tests (draft)
 

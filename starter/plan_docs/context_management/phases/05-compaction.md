@@ -1,6 +1,6 @@
 # Phase 5: Add semantic task state, compaction, and criteria-aware verification (conditional)
 
-Status: proposed — **conditional on Gate G2; spec is a stub, do not refine yet**
+Spec: stub — conditional on Gate G2; do not refine yet. Phase status lives only in [`../roadmap.md`](../roadmap.md).
 Depends on: Phase 4, Gate G2 (see [`../roadmap.md`](../roadmap.md))
 Design: [`../design.md`](../design.md) §9, §10 (semantic fields), §11, §14–§18, §19 (mature rules), §24, §25 (completed/remaining), §26 ("no new finding"), §27 (full guard), §34; invariants 3–6, 9–14
 Roadmap: [`../roadmap.md`](../roadmap.md)
@@ -45,12 +45,19 @@ Expected to be split into separate phases when G2 passes (DEC-007). Draft groupi
 - Does the full guard beat Phase 4's v1, or does it add rejections without adding correctness? What if the task states no explicit criteria — does it degrade to v1?
 - Where should this be split? (Decide with G2 data, not now.)
 
+## Interfaces and handoff
+
+- **Provides:** compaction functions (`should_compact`, `split_compactable_events`, `update_compact_state`, `validate_compact_state`) and the per-criterion guard.
+- **Reuses:** everything above. Extend `TaskState`, upgrade `validate_completion`, reuse `LLMClient` for the compaction call, `select_recent_events`, and `build_active_context`.
+- **Handoff:** decided when the phase is split after Gate G2.
+
 ## Exit criteria (draft)
 
 - Old history leaves active context after being incorporated; each event compacted once.
 - Constraints, changes, and unresolved bugs survive the §32 preservation tests.
 - The agent cannot complete using verification made stale by later relevant changes; the guard cannot deadlock a run.
 - **Beats the Tier A agent (Phase 4)** on completion or net score — otherwise do not ship.
+- `handoff.md` updated per `CLAUDE.md` › Finishing a session.
 
 ## Tests (draft)
 

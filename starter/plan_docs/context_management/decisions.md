@@ -253,3 +253,56 @@ The merged Phase 5 is large and is expected to be split again once G2 passes and
 to split on. Criteria-aware verification (guard v2) must carry its own flag and on/off measurement,
 since it no longer has its own phase boundary. Six GitHub issues instead of eight; retrieval gets
 one only if G3 passes.
+
+---
+
+## DEC-008: Run each phase in a fresh session, fed by imports plus a handoff ledger
+
+Status: Accepted  
+Phase: All  
+Date: 2026-09-21
+
+### Decision
+
+Each phase (refine or implement) runs in its own fresh session. What a session knows comes from:
+(1) imports in this directory's `CLAUDE.md`: `roadmap.md`, `decisions.md`, `handoff.md`, and
+`starter/agent/CLAUDE.md`; (2) reads the protocol requires: the phase spec, only the `design.md`
+sections it cites, and the agent source. `handoff.md` is the single ledger of interfaces
+(planned → implemented), code map, notes for the next phase, and deviations, and every phase must
+update it before it counts as done. Phases follow a reuse-before-create rule. `roadmap.md` is the
+only place phase status is tracked.
+
+### Rationale
+
+A fresh session has no memory of earlier phases, and the failure mode is a phase inventing its own
+helper because it cannot see what earlier phases built. The source plus a ledger of intended
+interfaces prevents parallel versions. Reviewing the real code showed the design's pseudocode
+invites exactly that: a separate `run_shell_with_output_capture` next to `run_shell`, action kinds
+(`complete`/`invalid`) that differ from the code's (`done`/`none`), and two names for the same
+classifier. The ledger fixes the names and the extension points up front.
+
+### Alternatives Considered
+
+1. Import `design.md` as well, so every session has the full design.
+2. Keep implementation notes inside each phase spec and have each session read all earlier specs.
+3. Rely on git history and the code alone, with no ledger.
+4. Import the plan from the root `CLAUDE.md` so it loads at launch in every session.
+
+### Why Rejected
+
+1 costs ~12K tokens per session, almost all of it sections the phase does not touch; the phase
+spec already cites the sections it needs. 2 spreads "what exists" across N files, duplicates
+content, and gives no single view. 3 shows what changed but not what later phases are meant to
+reuse. 4 taxes every session in the repo, including unrelated ones, with the plan's context.
+
+### Consequences
+
+- A nested `CLAUDE.md` loads when a file in its directory is read, not at launch, so each session
+  starts by reading a file here (the kickoff prompt in `CLAUDE.md`).
+- The ledger is only as good as the discipline of updating it; "handoff updated" is an exit
+  criterion of every phase.
+- About 8K tokens are loaded at each session start (this `CLAUDE.md` plus its four imports). `decisions.md` grows over time; if it passes
+  ~500 lines, split it into an index plus entries.
+- `starter/agent/CLAUDE.md` is imported, so a stale claim in it misleads every later session. Each
+  phase updates it where it becomes false.
+- Claude Code may ask for one-time approval of the imports.
