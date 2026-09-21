@@ -21,12 +21,12 @@ loses runs to context growth (DEC-004). A phase boundary is a point where we mea
 
 | # | Phase | Spec | Depends on | Status | Issue |
 |---|-------|------|-----------|--------|-------|
-| 0 | Establish baseline and price the tokens | [00](phases/00-baseline.md) | — | proposed | — |
-| 1 | Separate raw history from active context; canonicalize actions | [01](phases/01-history-separation.md) | 0 | proposed | — |
-| 2 | Add state-free loop controls | [02](phases/02-loop-controls.md) | 1 | proposed | — |
-| 3 | Offload large tool outputs | [03](phases/03-output-offloading.md) | 1 | proposed | — |
-| 4 | Add deterministic task state and completion guard v1 | [04](phases/04-deterministic-state.md) | 1, 2 (3 recommended) | proposed | — |
-| 5 | Add semantic task state, compaction, and criteria-aware verification *(conditional)* | [05](phases/05-compaction.md) | 4, G2 | proposed | — |
+| 0 | Establish baseline and price the tokens | [00](phases/00-baseline.md) | — | proposed | #1 |
+| 1 | Separate raw history from active context; canonicalize actions | [01](phases/01-history-separation.md) | 0 | proposed | #2 |
+| 2 | Add state-free loop controls | [02](phases/02-loop-controls.md) | 1 | proposed | #3 |
+| 3 | Offload large tool outputs | [03](phases/03-output-offloading.md) | 1 | proposed | #4 |
+| 4 | Add deterministic task state and completion guard v1 | [04](phases/04-deterministic-state.md) | 1, 2 (3 recommended) | proposed | #5 |
+| 5 | Add semantic task state, compaction, and criteria-aware verification *(conditional)* | [05](phases/05-compaction.md) | 4, G2 | proposed | #6 |
 
 Phases 2 and 3 are independent of each other and may be done in either order after Phase 1.
 
