@@ -6,6 +6,9 @@
 
 Statuses: `proposed` → `discussing` → `ready` → `implementing` → `completed`
 
+This table is the only place phase status is tracked; phase specs do not repeat it. What a finished
+phase leaves for the next one (interfaces, code map, notes) goes in [`handoff.md`](handoff.md).
+
 ## Structure: deterministic first, LLM compaction as a gated bet
 
 Phases are ordered by what they *depend on*, not by topic. Everything that needs no extra model

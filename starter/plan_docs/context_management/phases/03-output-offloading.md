@@ -1,6 +1,6 @@
 # Phase 3: Offload large tool outputs
 
-Status: proposed — **spec incomplete**
+Spec: draft, incomplete. Phase status lives only in [`../roadmap.md`](../roadmap.md).
 Depends on: Phase 1
 Design: [`../design.md`](../design.md) §8, §12, §20 (preview selection); invariants 7, 8
 Roadmap: [`../roadmap.md`](../roadmap.md)
@@ -31,11 +31,18 @@ the task container, with failure-aware previews so current errors stay actionabl
 - Per-stream (stdout/stderr) vs. combined handling.
 - Should the agent's prompt tell it about the output path, and how does that interact with token cost?
 
+## Interfaces and handoff
+
+- **Provides:** extended `tools.run_shell` (capture + offload), a failure-preview extractor, offload metadata on `ObservationEvent`.
+- **Reuses:** Phase 1's structured shell result and events. Extend `tools.run_shell`; do not add a parallel runner. Replaces `_truncate`.
+- **Handoff:** record the failure-preview function's name and limits. Phase 4's current-failure record reuses it.
+
 ## Exit criteria (draft, from §31 Phase 2)
 
 - Large outputs no longer dominate active context.
 - Full output remains recoverable.
 - Current errors remain detailed enough to diagnose.
+- `handoff.md` updated per `CLAUDE.md` › Finishing a session.
 
 ## Tests (draft)
 

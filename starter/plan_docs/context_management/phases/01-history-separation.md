@@ -1,6 +1,6 @@
 # Phase 1: Separate raw history from active context; canonicalize actions
 
-Status: proposed — **spec incomplete**
+Spec: draft, incomplete. Phase status lives only in [`../roadmap.md`](../roadmap.md).
 Depends on: Phase 0
 Design: [`../design.md`](../design.md) §5, §6, §7, §13, §23, §24 (partial), §29 (per-turn part); invariants 1, 2, 15
 Roadmap: [`../roadmap.md`](../roadmap.md)
@@ -22,6 +22,8 @@ all later phases must beat. No task state yet.
 - Deterministic `canonicalize_action` (no LLM); raw response kept in the event; parse failures recorded as explicit events (§7).
 - Canonicalization behind its own config flag so it can be measured on/off independently of the window (DEC-005).
 - Token counting before each request; per-turn telemetry by component.
+- A structured shell result: `tools.run_shell` returns exit code, stdout, stderr, sizes, and a did-not-complete flag; string formatting moves into one renderer. (Today it returns a formatted string, which events cannot be built from.)
+- Test scaffolding: the repo has no tests. Add pytest as a dev dependency, a `starter/tests/` directory, and reusable fakes (environment, LLM client, event builders).
 - Recent window: fixed pair count first, token-bounded later (§13). Never split an action from its observation.
 - The original task is never dropped.
 
@@ -41,13 +43,23 @@ all later phases must beat. No task state yet.
 - Reasoning-model fallback: `reasoning_content` is parsed as an action today. Does canonicalization make that visible or hide it?
 - Multiple code blocks in one response: does the canonical form record only the executed one?
 - `build_dashboard.py` mirrors the regex and nudge text; what must change there?
+- The endpoint's `usage` gives total prompt tokens only *after* a call; per-component and pre-request counts need local counting. Which tokenizer for an approved open-weight model?
+
+## Interfaces and handoff
+
+- **Provides** (ledger rows owned by Phase 1): events, raw history, structured shell result, `canonicalize_action`, `count_tokens`, `select_recent_events`, `build_active_context`, per-turn telemetry writer, context config and flags, test scaffolding.
+- **Reuses:** `tools.Action` and `tools.parse_action` (extend `Action`; no second action type), `prompts.observation_message` as the single observation renderer, `LLMClient.chat` and its `usage`.
+- **Changes existing code:** `tools.run_shell` returns a structured result instead of a formatted string; `agent.run` builds messages through the context manager instead of appending to one list.
+- **Handoff:** decide and record the module layout (by responsibility, not by phase); fill the *Code map*, the ledger rows, and *Notes for the next phase* (2, 3, 4).
 
 ## Exit criteria (draft)
 
 - Raw history remains complete and is what gets written to run metadata.
 - The model no longer receives the entire raw transcript; active context contains canonical actions only.
 - Token usage can be measured by context component.
+- Tests run with one documented command, and the fakes are reusable by later phases.
 - **Gate G1:** variant B compared with Phase 0 on the agreed protocol, with canonicalization on and off. No unexplained completion-rate regression.
+- `handoff.md` updated per `CLAUDE.md` › Finishing a session.
 
 ## Tests (draft)
 
