@@ -24,8 +24,8 @@ loses runs to context growth (DEC-004). A phase boundary is a point where we mea
 
 | # | Phase | Spec | Depends on | Status | Issue |
 |---|-------|------|-----------|--------|-------|
-| 0 | Establish baseline and price the tokens | [00](phases/00-baseline.md) | — | proposed | #1 |
-| 1 | Separate raw history from active context; canonicalize actions | [01](phases/01-history-separation.md) | 0 | proposed | #2 |
+| 0 | Establish baseline and price the tokens | [00](phases/00-baseline.md) | — | completed | #1 |
+| 1 | Separate raw history from active context; canonicalize actions | [01](phases/01-history-separation.md) | 0 | implementing (Gate G1 run 2026-09-22: token reduction confirmed (~33–58%); completion-rate regression on long-running tasks found, root-caused to the recent-window gap, accepted-not-fixed per DEC-033 — see `handoff.md` Gate G1 results) | #2 |
 | 2 | Add state-free loop controls | [02](phases/02-loop-controls.md) | 1 | proposed | #3 |
 | 3 | Offload large tool outputs | [03](phases/03-output-offloading.md) | 1 | proposed | #4 |
 | 4 | Add deterministic task state and completion guard v1 | [04](phases/04-deterministic-state.md) | 1, 2 (3 recommended) | proposed | #5 |
@@ -39,7 +39,7 @@ When G2 passes, Phase 5 is expected to be split using the measurements in hand (
 
 ## Gates
 
-- **G1 — after Phase 1.** Phase 1's active context *is* the rolling-window baseline (design §30 variant B), so it is measured against Phase 0 as part of that phase. Its canonicalization flag is also measured on/off. If dropping history or narration hurts completion, fix that before adding anything else.
+- **G1 — after Phase 1.** Phase 1's active context *is* the rolling-window baseline (design §30 variant B), so it is measured against Phase 0 as part of that phase. Its canonicalization flag is also measured on/off. If dropping history or narration hurts completion, fix that before adding anything else. **Run 2026-09-22 (see `handoff.md` Gate G1 results, DEC-033):** narration (canonicalization) did not hurt completion — confirmed harmless-to-helpful, stays on by default (DEC-034). Dropping history *did* hurt completion on two long-running tasks, root-caused to the fixed recent window, not to a Phase 1 defect. That regression was deliberately **not** fixed per this gate's own instruction — it was accepted and documented instead (DEC-033), on the grounds that the actual fix is Phase 4/5's task state and retrieval, not a Phase 1 patch, and blocking Phases 2–3 on it would delay independent work behind a gap the roadmap already scoped elsewhere. Flagging this as a deliberate deviation from this gate's literal instruction, not a silent miss.
 - **G2 — after Phase 4, before Phase 5 becomes `ready`.** Re-measure the Tier A agent against Phase 0. Proceed only if runs still fail or lose meaningful score because of context growth or forgotten details (overflow, lost constraints, repeated work) *and* the Phase 0 token pricing shows the remaining cost is worth an extra model call per compaction. If Tier A already solves it, close Phase 5 and the backlog as not needed.
 - **G3 — before the retrieval backlog item becomes a phase.** Traces from Phase 5 must show forgotten-detail failures that re-reading files or the offloaded logs does not fix (design §21: "preserve pointers, reread").
 - **Every phase.** Re-run the Phase 0 measurement protocol. A phase that lowers completion rate is not done, whatever it does to tokens.

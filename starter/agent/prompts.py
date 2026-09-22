@@ -15,9 +15,11 @@ There are three components:
    a response that contains neither a bash code block nor TASK_COMPLETE.
    This keeps the LLM on-protocol when it drifts into freeform text.
 
-3. **observation_message()** — Wraps the stdout/stderr/exit-code output of
-   a command execution into a user message. This is what the LLM sees after
-   each bash command runs in the container.
+3. **observation_message()** — Renders a ``tools.ShellResult`` (or an
+   ``events.ObservationEvent`` — anything with the same field names) into the
+   user message the LLM sees after each bash command runs in the container.
+   This is the single place that turns a shell result into text; ``tools.py``
+   stays a pure execution layer with no formatting of its own.
 
 Improvement ideas
 =================
@@ -75,14 +77,18 @@ block to run a command, or TASK_COMPLETE on its own if the task is fully done.\
 """
 
 
-def observation_message(observation: str) -> str:
-    """Format a command's output as a user message for the conversation.
+def observation_message(observation) -> str:
+    """Render a shell result as a user message for the conversation.
+
+    The single point that turns a ``tools.ShellResult`` or an
+    ``events.ObservationEvent`` into text — both carry the same field names
+    (``exit_code``, ``stdout``, ``stderr``, ``did_not_complete``, ``error``),
+    so either works here.
 
     Parameters
     ----------
-    observation : str
-        The combined stdout/stderr/exit-code string produced by
-        ``tools.run_shell()``.
+    observation
+        A ``tools.ShellResult`` or ``events.ObservationEvent``.
 
     Returns
     -------
@@ -90,4 +96,15 @@ def observation_message(observation: str) -> str:
         A user-message string that the LLM will see as the result of its
         last command, followed by a prompt for the next action.
     """
-    return f"Command output:\n{observation}\n\nWhat is your next action?"
+    if observation.did_not_complete:
+        body = f"[command did not complete: {observation.error}]"
+    else:
+        parts = [f"exit code: {observation.exit_code}"]
+        if observation.stdout:
+            parts.append(f"stdout:\n{observation.stdout}")
+        if observation.stderr:
+            parts.append(f"stderr:\n{observation.stderr}")
+        if not observation.stdout and not observation.stderr:
+            parts.append("(no output)")
+        body = "\n".join(parts)
+    return f"Command output:\n{body}\n\nWhat is your next action?"

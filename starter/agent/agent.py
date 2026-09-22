@@ -13,15 +13,16 @@ This file implements ``BaselineAgent``, a minimal
 `ReAct <https://arxiv.org/abs/2210.03629>`_ loop:
 
     ┌──────────────────────────────────────────────┐
-    │  Send conversation (system prompt + history)  │
-    │  to the LLM via HTTP (see llm.py)             │
+    │  Build active context (bounded, rebuilt each  │
+    │  turn from raw history — see context.py) and  │
+    │  send it to the LLM via HTTP (see llm.py)     │
     │                                               │
     │  Parse the LLM's response (see tools.py):     │
     │    ```bash ...```  → execute in container      │
     │    TASK_COMPLETE   → stop the loop             │
     │    anything else   → nudge the LLM to act      │
     │                                               │
-    │  Append command output back as context          │
+    │  Record the action/observation as raw events   │
     │  Repeat up to MAX_TURNS                        │
     └──────────────────────────────────────────────┘
 
@@ -30,13 +31,12 @@ inside the task's Docker container via ``environment.exec()``.
 
 What to improve
 ===============
-This baseline has no planning, no error recovery, no context-window
-management, and no self-critique. Those are the levers that separate a
-20% score from an 80% score. Ideas to explore:
+This baseline has no planning, no error recovery, and no self-critique.
+Context management (bounding what the model sees each turn) is handled by
+``context.py`` — see ``starter/plan_docs/context_management/``. Ideas to
+explore:
 
 - **Planning:** Have the LLM outline a multi-step plan before acting.
-- **Context management:** Summarize or drop old turns so the conversation
-  doesn't exceed the model's context window.
 - **Error recovery:** Detect repeated failures and try a different approach.
 - **Self-verification:** Run the task's tests before declaring done.
 - **Tool use:** Give the LLM higher-level actions (read_file, write_file)
@@ -54,16 +54,27 @@ Environment variables
 =====================
 - ``AGENT_MAX_TURNS``  — max reasoning/action cycles per task (default: 100).
 - ``AGENT_COMMAND_TIMEOUT_SEC`` — per-command timeout in seconds (default: 60).
+- ``AGENT_CANONICALIZE`` — canonicalize actions in active context (default: on). See ``context.py``.
+- ``AGENT_RECENT_WINDOW_PAIRS`` — recent action-observation pairs kept in active context (default: 6).
 """
 
+import dataclasses
 import os
 
 from harbor.agents.base import BaseAgent
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
+from agent.context import (
+    build_active_context,
+    canonicalize_action,
+    load_context_config,
+    record_observation,
+    record_turn_telemetry,
+)
+from agent.events import AssistantActionEvent, Event, now_iso
 from agent.llm import LLMClient
-from agent.prompts import NUDGE_MESSAGE, SYSTEM_PROMPT, observation_message
+from agent.prompts import SYSTEM_PROMPT
 from agent.tools import parse_action, run_shell
 
 MAX_TURNS = int(os.environ.get("AGENT_MAX_TURNS", "100"))
@@ -124,61 +135,87 @@ class BaselineAgent(BaseAgent):
             that even a timeout produces partial usage data.
         """
         llm = LLMClient(model_name=self.model_name)
+        context_config = load_context_config()
 
-        # The conversation is a plain list of OpenAI-format message dicts.
-        # The system prompt (from prompts.py) tells the LLM how to behave;
-        # the first user message is the task instruction from Harbor.
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": instruction},
-        ]
+        # Raw event history (append-only, complete) is separate from the
+        # bounded active context rebuilt from it each turn by context.py.
+        # See starter/plan_docs/context_management/ for the design.
+        raw_events: list[Event] = []
+        next_event_id = 0
+        telemetry: list[dict] = []
 
         n_input = 0
         n_output = 0
         turns = 0
         finished = False
 
-        for _ in range(MAX_TURNS):
-            turns += 1
-
-            # 1. Ask the LLM what to do next.
-            text, usage = await llm.chat(messages)
-            n_input += usage.get("prompt_tokens", 0)
-            n_output += usage.get("completion_tokens", 0)
-
+        def sync_metadata() -> None:
             # Update context every turn (not just at the end) so that if
             # Harbor kills us for a timeout, partial stats are still saved.
-            context.n_input_tokens = n_input
-            context.n_output_tokens = n_output
+            # Called after every raw-history mutation, not just once per
+            # turn: unlike the old `messages` list, the serialized form here
+            # isn't updated for free by reference, and run_shell (below) is
+            # exactly the kind of long step a timeout can land inside.
             context.metadata = {
                 "turns": turns,
                 "finished": finished,
-                "messages": messages,
+                "system_prompt": SYSTEM_PROMPT,
+                "instruction": instruction,
+                "messages": [dataclasses.asdict(e) for e in raw_events],
+                "telemetry": telemetry,
             }
 
-            messages.append({"role": "assistant", "content": text})
+        for _ in range(MAX_TURNS):
+            turns += 1
 
-            # 2. Parse the response into an action (see tools.py).
+            # 1. Ask the LLM what to do next, from the bounded active context
+            #    (not the full raw history).
+            active_messages = build_active_context(
+                SYSTEM_PROMPT, instruction, raw_events, context_config
+            )
+            text, usage = await llm.chat(active_messages)
+            n_input += usage.get("prompt_tokens", 0)
+            n_output += usage.get("completion_tokens", 0)
+            telemetry.append(record_turn_telemetry(turns, usage.get("prompt_tokens", 0)))
+
+            context.n_input_tokens = n_input
+            context.n_output_tokens = n_output
+            sync_metadata()
+
+            # 2. Parse the response into an action (see tools.py) and record
+            #    it as a raw event, whatever it turns out to be.
             action = parse_action(text)
+            action_event = AssistantActionEvent(
+                id=next_event_id,
+                turn=turns,
+                timestamp=now_iso(),
+                raw_response=text,
+                action_kind=action.kind,
+                command=action.command if action.kind == "shell" else None,
+                canonical_content=canonicalize_action(action),
+            )
+            next_event_id += 1
+            raw_events.append(action_event)
+            sync_metadata()
 
             if action.kind == "done":
                 finished = True
-                context.metadata["finished"] = True
+                sync_metadata()
                 break
 
             if action.kind == "none":
                 # The LLM didn't produce a bash block or TASK_COMPLETE.
-                # Nudge it to follow the protocol.
-                messages.append({"role": "user", "content": NUDGE_MESSAGE})
+                # build_active_context will show a nudge next turn.
                 continue
 
             # 3. Execute the command inside the task's Docker container.
             self.logger.info("turn %d: %s", turns, action.command[:200])
-            observation = await run_shell(
+            shell_result = await run_shell(
                 environment, action.command, timeout_sec=COMMAND_TIMEOUT_SEC
             )
 
-            # 4. Feed the output back to the LLM as context for the next turn.
-            messages.append(
-                {"role": "user", "content": observation_message(observation)}
-            )
+            # 4. Record the observation as a raw event for next turn's context.
+            observation_event = record_observation(shell_result, turns, next_event_id)
+            next_event_id += 1
+            raw_events.append(observation_event)
+            sync_metadata()

@@ -4,8 +4,8 @@ Spec: ready. Phase status lives only in [`../roadmap.md`](../roadmap.md).
 Depends on: Phase 0
 Design: [`../design.md`](../design.md) §5, §6, §7, §13, §23, §24 (partial), §29 (per-turn part); invariants 1, 2, 15
 Roadmap: [`../roadmap.md`](../roadmap.md)
-Issue: —
-Decisions: DEC-003, DEC-005, DEC-011, DEC-012, DEC-013, DEC-014, DEC-015, DEC-016, DEC-017, DEC-018, DEC-019, DEC-020, DEC-021, DEC-022, DEC-023, DEC-024, DEC-025, DEC-026, DEC-027, DEC-028
+Issue: #2
+Decisions: DEC-003, DEC-005, DEC-011, DEC-012, DEC-013, DEC-014, DEC-015, DEC-016, DEC-017, DEC-018, DEC-019, DEC-020, DEC-021, DEC-022, DEC-023, DEC-024, DEC-025, DEC-026, DEC-027, DEC-028, DEC-029, DEC-030, DEC-031, DEC-032, DEC-033, DEC-034
 
 ## Goal
 
@@ -23,20 +23,23 @@ all later phases must beat. No task state yet.
   DEC-022**, not copied verbatim from design §6). `starter/agent/context.py` — new module holding
   `canonicalize_action`, `select_recent_events`, `build_active_context`, the per-turn telemetry
   writer, context config/flags (**scope trimmed per DEC-023**), and a `record_observation(shell_result,
-  turn)` helper (signature unchanged — `command` comes from `shell_result.command`, DEC-025) that
-  builds an `ObservationEvent` from `tools.run_shell`'s result. Neither module is a
-  stateful class; `context.py`'s functions take a plain `raw_events` list as a parameter and return
-  new values — no hidden state.
+  turn, event_id)` helper (`command` comes from `shell_result.command`, DEC-025; `event_id` is the
+  caller-supplied id from `agent.py`'s counter, DEC-030) that builds an `ObservationEvent` from
+  `tools.run_shell`'s result. Neither module is a stateful class; `context.py`'s functions take a
+  plain `raw_events` list as a parameter and return new values — no hidden state.
 - **`tools.run_shell`** changes to return a plain `ShellResult` dataclass instead of a formatted
   string: `command: str` (**DEC-025** — carried through unchanged from `run_shell`'s own `command`
   argument, so `record_observation` has a source for `ObservationEvent.command` without a third
-  parameter), `exit_code`, `stdout`, `stderr` (**already truncated to `MAX_OBSERVATION_CHARS`, same as
-  today — `tools._truncate` is unchanged this phase, per DEC-021**), `original_stdout_chars`,
-  `original_stderr_chars` (pre-truncation lengths), `truncated: bool`, `did_not_complete: bool`,
-  `error: str | None` (the exception message when `did_not_complete` is true, replacing today's
-  `except Exception` → formatted-string path). String formatting for the model-facing observation
-  message moves into `prompts.observation_message`, which becomes the single renderer of a
-  `ShellResult`/`ObservationEvent` into text. `tools.py` does not import `events.py`.
+  parameter), `exit_code: int | None`, `stdout: str`, `stderr: str` (**already truncated to
+  `MAX_OBSERVATION_CHARS`, same as today — `tools._truncate` is unchanged this phase, per
+  DEC-021**), `original_stdout_chars`, `original_stderr_chars` (pre-truncation lengths),
+  `truncated: bool`, `did_not_complete: bool`, `error: str | None` (the exception message when
+  `did_not_complete` is true, replacing today's `except Exception` → formatted-string path). **When
+  `did_not_complete` is true (DEC-029):** `exit_code=None`, `stdout=""`, `stderr=""`,
+  `original_stdout_chars=0`, `original_stderr_chars=0`, `truncated=False` — there was no result to
+  read any of these from. String formatting for the model-facing observation message moves into
+  `prompts.observation_message`, which becomes the single renderer of a `ShellResult`/
+  `ObservationEvent` into text. `tools.py` does not import `events.py`.
 - **`ObservationEvent` fields (DEC-022):** `command`, `exit_code`, `stdout`, `stderr`,
   `original_stdout_chars`, `original_stderr_chars`, `truncated`, `did_not_complete`, `error` — carried
   straight through from `ShellResult` by `record_observation`. Design §6's `started_at`,
@@ -50,7 +53,8 @@ all later phases must beat. No task state yet.
   counter starting at 0, shared across both `AssistantActionEvent` and `ObservationEvent` and
   incremented by one after every event append — not derived from `len(raw_events)`, so ids stay
   stable identities if a future phase adds editing/deletion of raw events. The counter value is
-  passed explicitly into the event constructor / `record_observation` at creation time.
+  passed explicitly into the event constructor / `record_observation` at creation time, as
+  `record_observation`'s third parameter (**DEC-030**).
 - **Canonical vocabulary (DEC-017):** `AssistantActionEvent.action_kind` is `"shell"` / `"done"` /
   `"none"` — exactly `tools.Action.kind`'s values, not design.md's `"complete"`/`"invalid"`.
 - **`canonicalize_action(action: Action) -> str`** (deterministic, no LLM): for `kind == "shell"`,
@@ -189,3 +193,13 @@ text as written: `ObservationEvent.command`'s source (DEC-025), the nudge-turn i
 (DEC-028). All four are now resolved and folded into the Scope section above; see those decisions
 for the reasoning and rejected alternatives. This section is kept as a record that the goldfish test
 found real gaps, not to re-litigate them.
+
+A second, independent goldfish test pass the same day found one more: `ShellResult`/
+`ObservationEvent`'s field values (and `exit_code`'s type) were unspecified for the
+`did_not_complete=True` branch — resolved as DEC-029 and folded into the `tools.run_shell` bullet
+above.
+
+A third goldfish test pass the same day found that DEC-025 and DEC-027, each correct on its own,
+left `record_observation`'s stated signature contradicting DEC-027's requirement that an event id
+be passed into it at creation time — resolved as DEC-030 and folded into the `context.py`
+module-layout bullet above.

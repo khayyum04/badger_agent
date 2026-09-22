@@ -12,8 +12,10 @@ container. It handles two things:
      send a nudge message asking it to try again.
 
 2. **Execution** — Running the parsed command inside the task's Docker
-   container via Harbor's ``environment.exec()`` and formatting the
-   stdout/stderr/exit-code into a string the LLM can read.
+   container via Harbor's ``environment.exec()`` and returning a structured
+   ``ShellResult``. Rendering that into text for the model is
+   ``prompts.observation_message``'s job, not this module's — ``tools.py``
+   stays a pure execution layer.
 
 Output truncation
 =================
@@ -68,6 +70,48 @@ class Action:
     command: str = ""
 
 
+@dataclass
+class ShellResult:
+    """The structured result of executing one shell command.
+
+    ``events.ObservationEvent`` is built straight from this (see
+    ``context.record_observation``); rendering it into text for the model is
+    ``prompts.observation_message``'s job.
+
+    Attributes
+    ----------
+    command : str
+        The command that was run, carried through unchanged from ``run_shell``'s
+        own ``command`` argument.
+    exit_code : int | None
+        The process's exit code, or ``None`` if it never produced one
+        (``did_not_complete`` is true).
+    stdout, stderr : str
+        Already truncated to ``MAX_OBSERVATION_CHARS`` each, same as today.
+        Empty strings when ``did_not_complete`` is true.
+    original_stdout_chars, original_stderr_chars : int
+        The pre-truncation lengths, so a later reader can tell how much was
+        cut. ``0`` when ``did_not_complete`` is true.
+    truncated : bool
+        Whether either stream was cut. ``False`` when ``did_not_complete`` is
+        true — there was nothing to truncate.
+    did_not_complete : bool
+        True if ``environment.exec`` raised before producing a result.
+    error : str | None
+        The exception message when ``did_not_complete`` is true, else ``None``.
+    """
+
+    command: str
+    exit_code: int | None
+    stdout: str
+    stderr: str
+    original_stdout_chars: int
+    original_stderr_chars: int
+    truncated: bool
+    did_not_complete: bool
+    error: str | None
+
+
 def parse_action(text: str) -> Action:
     """Extract a single action from the LLM's response text.
 
@@ -96,18 +140,23 @@ def parse_action(text: str) -> Action:
     return Action("none")
 
 
-def _truncate(text: str) -> str:
-    """Truncate long text, keeping the first and last halves."""
+def _truncate(text: str) -> tuple[str, bool]:
+    """Truncate long text, keeping the first and last halves.
+
+    Returns the (possibly truncated) text and whether truncation happened.
+    The original length is cheap to get separately via ``len(text)`` before
+    calling this, so it isn't returned here too.
+    """
     if len(text) <= MAX_OBSERVATION_CHARS:
-        return text
+        return text, False
     half = MAX_OBSERVATION_CHARS // 2
     omitted = len(text) - MAX_OBSERVATION_CHARS
-    return f"{text[:half]}\n... [{omitted} characters omitted] ...\n{text[-half:]}"
+    return f"{text[:half]}\n... [{omitted} characters omitted] ...\n{text[-half:]}", True
 
 
 async def run_shell(
     environment: BaseEnvironment, command: str, timeout_sec: int
-) -> str:
+) -> ShellResult:
     """Execute a bash command in the task's Docker container.
 
     Parameters
@@ -123,21 +172,39 @@ async def run_shell(
 
     Returns
     -------
-    str
-        A formatted string containing the exit code, stdout, and stderr
-        (each truncated to ``MAX_OBSERVATION_CHARS``). This string is what
-        gets fed back to the LLM as the command's "observation."
+    ShellResult
+        The structured result — ``exit_code`` is ``None`` and ``stdout``/
+        ``stderr`` are empty when ``did_not_complete`` is true (the command
+        never produced a result to read them from).
     """
     try:
         result = await environment.exec(command=command, timeout_sec=timeout_sec)
     except Exception as exc:
-        return f"[command did not complete: {exc}]"
+        return ShellResult(
+            command=command,
+            exit_code=None,
+            stdout="",
+            stderr="",
+            original_stdout_chars=0,
+            original_stderr_chars=0,
+            truncated=False,
+            did_not_complete=True,
+            error=str(exc),
+        )
 
-    parts = [f"exit code: {result.return_code}"]
-    if result.stdout:
-        parts.append(f"stdout:\n{_truncate(result.stdout)}")
-    if result.stderr:
-        parts.append(f"stderr:\n{_truncate(result.stderr)}")
-    if not result.stdout and not result.stderr:
-        parts.append("(no output)")
-    return "\n".join(parts)
+    raw_stdout = result.stdout or ""
+    raw_stderr = result.stderr or ""
+    stdout, stdout_truncated = _truncate(raw_stdout)
+    stderr, stderr_truncated = _truncate(raw_stderr)
+
+    return ShellResult(
+        command=command,
+        exit_code=result.return_code,
+        stdout=stdout,
+        stderr=stderr,
+        original_stdout_chars=len(raw_stdout),
+        original_stderr_chars=len(raw_stderr),
+        truncated=stdout_truncated or stderr_truncated,
+        did_not_complete=False,
+        error=None,
+    )

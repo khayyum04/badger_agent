@@ -1213,3 +1213,323 @@ harmless but pointless.
 
 None beyond documentation — this closes an otherwise-unspecified field value with no behavioral
 effect this phase.
+
+---
+
+## DEC-029: `ShellResult`/`ObservationEvent` field values when `did_not_complete=True`
+
+Status: Accepted
+Phase: 1
+Date: 2026-09-22
+
+### Decision
+
+`ShellResult.exit_code` is typed `int | None` and is `None` when `did_not_complete` is `True`. In
+that same branch: `stdout = ""`, `stderr = ""`, `original_stdout_chars = 0`,
+`original_stderr_chars = 0`, `truncated = False`. `ObservationEvent` carries these same values
+through unchanged, per DEC-021's "carried straight through."
+
+### Rationale
+
+A goldfish test of this phase spec (2026-09-22) found six of `ShellResult`'s nine fields
+unspecified for the `did_not_complete=True` branch (`environment.exec` raised before producing a
+result) — DEC-021 only pins down `did_not_complete` and `error`. `exit_code`'s type wasn't stated
+either. `None` is the only representation of "no exit code exists" that can't be silently misread
+as a real (failing) exit code by code that omits the `did_not_complete` check first — a sentinel
+int (e.g. `-1`) is indistinguishable from a genuine exit code to any such comparison, and this
+field matters downstream: the handoff ledger names Phase 4's failure extractor as a reader of it.
+The other fields' values follow directly from "no output was ever captured": empty strings, zero
+counts, no truncation.
+
+### Alternatives Considered
+
+1. `exit_code: int = -1` (or another sentinel value), keeping the field non-`Optional`.
+
+### Why Rejected
+
+1 keeps a simpler type but reintroduces the silent-misread risk above: a consumer that forgets to
+check `did_not_complete` first reads `-1` as an ordinary failing exit code rather than "no command
+ever ran." `None` forces that case to be visible — an unchecked `None` where an `int` was expected
+is either a type-checker error or a runtime error, whereas a wrong sentinel read as real data fails
+silently.
+
+### Consequences
+
+`ObservationEvent.exit_code` is `int | None`; any later phase reading it (Phase 4's failure
+extractor, per the handoff ledger) must handle `None` explicitly rather than assuming an `int` is
+always present. `tools.run_shell`'s docstring documents the `None` case alongside
+`did_not_complete`.
+
+---
+
+## DEC-030: `record_observation` takes `event_id` as an explicit third parameter
+
+Status: Accepted
+Phase: 1
+Date: 2026-09-22
+
+### Decision
+
+`record_observation`'s signature is `record_observation(shell_result, turn, event_id) ->
+ObservationEvent`. `agent.py`'s `run()` loop passes the current value of its `next_event_id`
+counter (DEC-027) into this third parameter at the call site, then increments the counter — the
+same treatment `next_event_id` already gets for `AssistantActionEvent`'s constructor.
+
+### Rationale
+
+A third goldfish test of this phase spec (2026-09-22) found DEC-025 and DEC-027 in direct conflict
+over this same function: DEC-025 pinned `record_observation(shell_result, turn)` at two parameters
+("signature unchanged ... rather than taking a third parameter"), while DEC-027, accepted
+immediately afterward, requires that "the counter value is passed explicitly into the event
+constructor / `record_observation` at creation time" — which needs a parameter DEC-025's signature
+has no room for. DEC-025 was correct when written; it predates DEC-027, which introduced the
+id-passing requirement and was never checked against DEC-025's literal signature afterward.
+`ObservationEvent.id` is a required base field (DEC-022) with exactly one constructor
+(`record_observation`), so the id has to arrive as an argument to it — there is no other place to
+set it, and dataclasses are not specified as mutable-after-construction anywhere in this plan.
+
+### Alternatives Considered
+
+1. Keep `record_observation(shell_result, turn)` at two parameters; have the caller take the
+   `ObservationEvent` `record_observation` returns and set `.id` on it afterward, or give
+   `context.py` a second, internal counter so no id needs to cross the function boundary at all.
+
+### Why Rejected
+
+Setting `.id` after construction needs `ObservationEvent` to be mutable for a single field nothing
+else needs mutated, and produces an object that is briefly invalid (no id) between construction and
+the fixup — a state worth avoiding for no gain over just passing the id in. A second,
+`context.py`-internal counter duplicates id ownership across two places instead of the single owner
+DEC-027 already decided on (`agent.py`'s `next_event_id`, shared across both event types
+specifically to keep ids assigned from one sequence) — reintroducing exactly the dual-counter
+collision risk DEC-027 was written to avoid.
+
+### Consequences
+
+The `context.py` module-layout bullet in `phases/01-history-separation.md`'s Scope section is
+corrected to `record_observation(shell_result, turn, event_id)`, citing both DEC-025 (for
+`command`) and DEC-030 (for `event_id`). No other Phase 1 symbol changes. `record_observation`'s
+docstring should say which positional argument is which, since `turn` and `event_id` are both
+plain `int`s and swapping them at a call site would fail silently (no type error) rather than
+loudly.
+
+---
+
+## DEC-031: `context.metadata` is rebuilt after every raw-history mutation, not once per turn
+
+Status: Accepted
+Phase: 1
+Date: 2026-09-22
+
+### Decision
+
+`agent.py`'s `run()` loop calls a local `sync_metadata()` closure (which rebuilds the whole
+`context.metadata` dict, including a fresh `[dataclasses.asdict(e) for e in raw_events]`) after
+*every* mutation of `raw_events`, `finished`, or the telemetry list within a turn — up to four
+times per turn (after the LLM call, after the action event is appended, after `finished` is set on
+a `"done"` action, and after the observation event is appended) — rather than once per turn as the
+pre-Phase-1 baseline did.
+
+### Rationale
+
+The baseline wrote `context.metadata["messages"] = messages` once per turn and relied on `messages`
+being a shared mutable reference: later `messages.append(...)` calls that same turn were reflected
+automatically, with no second assignment, which is why one write per turn was already safe there
+(recorded in the pre-Phase-1 `agent/CLAUDE.md`: "`messages` is stored by reference, so later appends
+show up automatically"). Phase 1's `context.metadata["messages"]` is instead built by serializing
+`raw_events` into fresh dicts (`dataclasses.asdict`) — a value, not a reference to `raw_events`
+itself — so a single early-in-turn write would go stale the moment `raw_events` gets another event
+appended later that same turn. `run_shell` (awaiting `environment.exec`) is exactly the kind of
+long, hang-prone step most likely to be mid-execution when Harbor's overall per-task timeout fires,
+so leaving its resulting `ObservationEvent` unrecorded in `context.metadata` until a write that never
+comes would reintroduce the exact partial-progress-loss failure mode the "update every turn"
+invariant exists to prevent.
+
+### Alternatives Considered
+
+1. Keep a single `context.metadata` write per turn, placed after the last event of the turn is
+   appended (i.e., after the observation, or after the action event for `"none"`/`"done"` turns).
+2. Make `raw_events` itself the value stored at `context.metadata["messages"]` (skip serialization),
+   restoring the by-reference trick.
+
+### Why Rejected
+
+1 reintroduces a real gap: if the process is killed while `run_shell` is still awaiting
+`environment.exec` (the single most timeout-prone line in the loop), `context.metadata` would still
+only reflect the state as of the *start* of that turn, discarding this turn's assistant action too
+— not just wiping the pending observation. 2 was rejected because DEC-012 requires
+`context.metadata["messages"]` to hold serialized (JSON-safe) event data, not live dataclass
+instances Harbor doesn't know how to write to `result.json`.
+
+### Consequences
+
+`sync_metadata()` re-serializes the entire `raw_events` list on every call, which is O(n) in the
+number of events so far and is called a small constant number of extra times per turn; this is
+cheap (dict/list construction, no I/O) at the event counts a 100-turn task produces and was not
+judged worth optimizing this phase. A later phase that makes serialization non-trivial (e.g. a much
+larger per-event payload) should revisit this rather than assume the extra calls stay free.
+
+---
+
+## DEC-032: `context.metadata` gains `system_prompt`/`instruction` keys, outside `"messages"`
+
+Status: Accepted
+Phase: 1
+Date: 2026-09-22
+
+### Decision
+
+`agent.py` writes `context.metadata["system_prompt"]` (the constant `prompts.SYSTEM_PROMPT`) and
+`context.metadata["instruction"]` (the task instruction string `run()` receives) every turn,
+alongside `"turns"`/`"finished"`/`"messages"`/`"telemetry"`. Per DEC-012, `"messages"` itself stays
+exactly the serialized raw event history — only `AssistantActionEvent`/`ObservationEvent` entries,
+nothing else.
+
+### Rationale
+
+DEC-012 scopes `"messages"` to raw history, and raw history has no event for the system prompt or
+task instruction — `build_active_context` reassembles them fresh from `run()`'s own arguments every
+turn rather than storing them as events (they're static for the whole run, not something that
+happens at a turn). Before Phase 1, `scripts/build_dashboard.py` got both for free because they were
+`messages[0]`/`messages[1]` in the OpenAI-format list; under DEC-012's raw-event-only `"messages"`,
+that information would disappear from every future `result.json` with no replacement, degrading the
+dashboard (and any other future reader of `context.metadata`) from "shows the whole audit trail" to
+"shows the whole audit trail except what the task was" — a real loss of debugging capability for a
+feature whose stated purpose is a complete audit record (DEC-003), not a redefinition of what
+"complete" means. Checking `result.json`'s other top-level fields (`config.task`, etc.) confirmed
+the literal instruction text isn't recorded anywhere else Harbor writes.
+
+### Alternatives Considered
+
+1. Accept the loss: `build_dashboard.py` (and any other consumer) simply cannot show the task
+   instruction or system prompt for Phase-1-and-later runs.
+2. Have `build_dashboard.py` hardcode/mirror the current `SYSTEM_PROMPT` text as a constant (as it
+   already does for `NUDGE_MESSAGE`), and drop instruction display entirely.
+
+### Why Rejected
+
+1 was rejected as an unforced, unrequested regression — nothing in the phase spec or its decisions
+says the task instruction should stop being visible, and DEC-019's own goal for the dashboard patch
+is to "keep rendering a transcript," which a transcript with no visible task instruction only
+nominally satisfies. 2 could work for `SYSTEM_PROMPT` (a fixed constant, like `NUDGE_MESSAGE`) but
+not for `instruction`, which is per-task data with no fixed value to mirror.
+
+### Consequences
+
+`context.metadata` has two more static (per-run, not per-turn-varying) keys beyond what DEC-012 and
+DEC-024 specify. This is additive only — it does not change the definition or contents of
+`"messages"`, so DEC-012's audit-record guarantee for raw history is unaffected. Any later phase
+adding its own static, whole-run metadata should follow the same pattern (a new top-level key) rather
+than folding it into `"messages"`.
+
+---
+
+## DEC-033: Gate G1's regression on long-running tasks is accepted, not fixed, this phase
+
+Status: Accepted
+Phase: 1 (binds Phase 4/5 follow-up)
+Date: 2026-09-22
+
+### Decision
+
+Gate G1 (two harbor runs, `jobs/phase1-canon-on` and `jobs/phase1-canon-off`, same settings as the
+Phase 0 baseline) found that `build-cython-ext` and `fix-code-vulnerability` — 3/3-stable in the
+baseline, finishing in 25–87 turns — regress to `finished=False` in both `AGENT_CANONICALIZE`
+variants, running to the 100-turn or 900s cap without completing. Full numbers and root-cause
+investigation are recorded in `handoff.md`'s *Gate G1 results*. Phase 1 ships with this regression
+as a known, documented limitation. `AGENT_RECENT_WINDOW_PAIRS` is left at its default (6) — not
+tuned — and no further confirmation re-run was done this phase. `roadmap.md` keeps Phase 1 at
+`implementing`, not `completed`, pending this being resolved or explicitly accepted as shippable at
+submission time.
+
+### Rationale
+
+Root-cause investigation (turn counts, wall-clock time, and transcript tails compared directly
+against the same two tasks' baseline runs) points at DEC-014's own predicted, accepted gap: the
+fixed 6-pair recent window drops early discoveries on tasks needing many turns, and the agent
+re-explores/re-verifies instead of converging, rather than any implementation defect specific to
+this phase's code. Per-turn wall-clock latency did not get worse (if anything, slightly better,
+consistent with sending less context per request) — the trials simply needed far more turns to reach
+the same conclusion. This is precisely the failure mode Phase 4 (deterministic task state) and Phase
+5/the retrieval backlog (semantic state, compaction, retrieval of older evidence) exist to fix per
+the roadmap's own structure (`roadmap.md`'s Gate G2 already asks "do runs still fail... because of
+context growth or forgotten details"). Spending Phase 1's own measurement budget re-tuning a window
+size or re-running for confirmation would be treating a gap the plan already named and scoped a later
+phase to fix as if it were an open question, when the real content of the fix (giving the model a way
+to retain or retrieve early findings without keeping the whole transcript) doesn't exist until then.
+
+### Alternatives Considered
+
+1. Increase `AGENT_RECENT_WINDOW_PAIRS` (e.g. to 12–15) and re-run both variants (~60 more minutes)
+   to see if a larger window closes the gap.
+2. Re-run `canon-on` and `canon-off` once more, unchanged, purely to satisfy the noise rule's
+   "re-run once to rule out a one-off" before concluding anything.
+3. Treat this as blocking: hold Phase 1 in `implementing` and refuse to let Phase 2/3 start until
+   the regression is actually fixed (not just documented).
+
+### Why Rejected
+
+1 is a band-aid that doesn't fix the underlying problem (any fixed window eventually loses
+information on a long-enough task) and costs real measurement time for a result whose interpretation
+would still be provisional — a task that passes with a window of 15 doesn't prove the mechanism is
+sound, only that this particular 10-task sample didn't need more than that. 2 was judged unnecessary
+given the corroboration already in hand: the same two tasks failed identically (never finishing, same
+exploratory-not-looping failure shape) across two independent variants against a 3/3-stable baseline
+— a third run of an unchanged config was judged unlikely to change the conclusion enough to justify
+another ~60 minutes. 3 conflicts with `roadmap.md`'s own phase-ordering rationale (DEC-004, DEC-006):
+Phases 2 and 3 are independent of the state/retrieval work that would actually fix this, and blocking
+them on a fix that belongs in Phase 4/5 anyway delays independent, lower-risk work behind a gap the
+plan already scoped elsewhere.
+
+### Consequences
+
+- `roadmap.md`'s Phase 1 row stays `implementing`, not `completed`, with this decision linked.
+- Phase 4 and Phase 5/backlog work should treat `build-cython-ext` and `fix-code-vulnerability` as a
+  concrete regression test (re-run under the same settings, check `finished=True` in a turn count
+  comparable to the 25–87-turn baseline), not just re-run the aggregate 10-task protocol and check
+  the overall pass rate — this phase's own numbers show the aggregate rate can look unchanged while
+  individual tasks silently regress.
+- `AGENT_RECENT_WINDOW_PAIRS` remains an untried lever (still just the design.md-suggested default)
+  if a future phase wants a cheap interim mitigation before task state/retrieval are ready.
+- Before final submission, the owner needs to explicitly decide whether this regression is acceptable
+  to ship if Phase 4/5 aren't finished in time — this decision defers that call, it doesn't make it.
+
+---
+
+## DEC-034: `AGENT_CANONICALIZE` default-on (DEC-018) is confirmed by Gate G1, not reopened
+
+Status: Accepted
+Phase: 1
+Date: 2026-09-22
+
+### Decision
+
+Gate G1's data confirms DEC-018's default: `canon-on` beat `canon-off` on both axes measured —
+completion rate (4/10 vs. 2/10, though `canon-on`'s 4/10 has its own churn, see DEC-033) and total
+tokens (1,807,782 vs. 2,879,681, `canon-on` using ~37% fewer). `AGENT_CANONICALIZE` stays default-on;
+no code or default change.
+
+### Rationale
+
+DEC-005's own consequence commits to shipping canonicalization off only if it measures as harmful.
+It didn't — it measured as strictly better on the two axes Gate G1 tracks. The two tasks that
+flipped to pass only under `canon-on` (`configure-git-webserver`, `regex-log`) are a secondary,
+weaker signal in the same direction (not required to reach this decision, since the primary
+completion-rate/token comparison already favors `canon-on` on its own).
+
+### Alternatives Considered
+
+1. Reopen DEC-018 given `canon-on`'s own regressions (`build-cython-ext`, `fix-code-vulnerability`).
+
+### Why Rejected
+
+Those two regressions occurred identically under `canon-off` too (see DEC-033), so they are not
+evidence against canonicalization specifically — they're evidence against the window size, which
+both variants share. Weighing canonicalization on its own two isolated axes (the entire point of
+DEC-005's flag existing) shows no case for turning it off.
+
+### Consequences
+
+None beyond confirmation — this closes the "should Gate G1 change `AGENT_CANONICALIZE`'s default"
+question without a code change. The regression DEC-033 tracks is unaffected by this decision, since
+it is not canonicalization-specific.

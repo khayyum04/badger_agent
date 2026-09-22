@@ -3,8 +3,16 @@
 
 Reads a job directory produced by `harbor run` (e.g. `jobs/2026-09-12__21-32-36/`)
 and renders every trial's `result.json` -- including the full agent conversation
-in `agent_result.metadata.messages` -- into one static HTML file with no external
-dependencies, so it can be opened directly via `file://`.
+reconstructed from `agent_result.metadata` -- into one static HTML file with no
+external dependencies, so it can be opened directly via `file://`.
+
+Since Phase 1 of context management (see starter/plan_docs/context_management/),
+`metadata.messages` holds the raw event history (`AssistantActionEvent`/
+`ObservationEvent` dicts, discriminated by `event_type`) rather than an
+OpenAI-format role/content list, and the static `system_prompt`/`instruction`
+strings live alongside it as separate metadata keys. Pre-Phase-1 job directories
+(no `event_type` key on the first message) are still readable -- `build_trial_record`
+detects the shape and dispatches to `classify_messages` (old) or `classify_events` (new).
 
 This is a local-only dev tool: transcripts can contain anything the agent `cat`'d
 inside the container (see starter/docs/safety.md), so the output is never
@@ -27,7 +35,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-# Mirrors starter/agent/tools.py::CODE_BLOCK_RE
+# Mirrors starter/agent/tools.py::CODE_BLOCK_RE. Used only to split a "shell"
+# event's raw_response into narration + command for display -- the command
+# itself now comes straight from the event's own `command` field.
 CODE_BLOCK_RE = re.compile(r"```(?:bash|sh|shell)?\s*\n(.*?)```", re.DOTALL)
 
 # Mirrors starter/agent/prompts.py::NUDGE_MESSAGE
@@ -36,6 +46,7 @@ NUDGE_MESSAGE = (
     "block to run a command, or TASK_COMPLETE on its own if the task is fully done."
 )
 
+# Pre-Phase-1 jobs (see below) formatted observations as this literal string shape.
 OBSERVATION_PREFIX = "Command output:\n"
 OBSERVATION_SUFFIX = "\n\nWhat is your next action?"
 
@@ -57,7 +68,12 @@ def duration_sec(started_at: str | None, finished_at: str | None) -> float | Non
 
 
 def parse_observation(body: str) -> dict[str, Any]:
-    """Split a run_shell()-formatted observation string into its parts."""
+    """Split a pre-Phase-1 run_shell()-formatted observation string into its parts.
+
+    Only used for job directories from before the Phase 1 context-management change
+    (see `classify_messages` below) -- Phase 1 and later jobs carry these fields
+    structured already, on the `ObservationEvent` dict itself.
+    """
     exit_code = None
     stdout = None
     stderr = None
@@ -78,7 +94,13 @@ def parse_observation(body: str) -> dict[str, Any]:
 
 
 def classify_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Turn the flat OpenAI-format message list into render-ready turn records."""
+    """Turn a pre-Phase-1 OpenAI-format message list into render-ready turn records.
+
+    Kept for backward compatibility: job directories from before the Phase 1
+    context-management change (e.g. the baseline-of-record jobs every later gate
+    compares against) still have this shape in `metadata.messages`, and
+    `handoff.md`'s own measurement protocol requires reading them with this tool.
+    """
     turns: list[dict[str, Any]] = []
     seen_task = False
 
@@ -122,10 +144,78 @@ def classify_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return turns
 
 
+def classify_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Turn the raw event history (Phase 1's `events.py` shape) into render-ready turn records."""
+    turns: list[dict[str, Any]] = []
+
+    for event in events:
+        event_type = event.get("event_type")
+
+        if event_type == "assistant_action":
+            action_kind = event.get("action_kind")
+            raw_response = event.get("raw_response") or ""
+
+            if action_kind == "shell":
+                match = CODE_BLOCK_RE.search(raw_response)
+                prose = raw_response[: match.start()].strip() if match else raw_response.strip()
+                turns.append({"kind": "assistant", "text": prose, "command": event.get("command")})
+            elif action_kind == "done":
+                turns.append({"kind": "assistant", "text": raw_response.strip(), "command": None})
+            else:
+                # "none" -- no valid action found; the agent was nudged next turn
+                # (the nudge itself isn't stored as an event, so it's synthesized
+                # here from the same NUDGE_MESSAGE constant agent.py sends).
+                turns.append({"kind": "assistant", "text": raw_response.strip(), "command": None})
+                turns.append({"kind": "nudge", "text": NUDGE_MESSAGE})
+            continue
+
+        if event_type == "observation":
+            if event.get("did_not_complete"):
+                turns.append(
+                    {
+                        "kind": "observation",
+                        "exit_code": None,
+                        "stdout": None,
+                        "stderr": f"[command did not complete: {event.get('error')}]",
+                    }
+                )
+            else:
+                turns.append(
+                    {
+                        "kind": "observation",
+                        "exit_code": event.get("exit_code"),
+                        "stdout": event.get("stdout") or None,
+                        "stderr": event.get("stderr") or None,
+                    }
+                )
+            continue
+
+        turns.append({"kind": "other", "role": event_type, "text": json.dumps(event)})
+
+    return turns
+
+
 def build_trial_record(task_name: str, trial_name: str, data: dict[str, Any]) -> dict[str, Any]:
     agent_result = data.get("agent_result") or {}
     metadata = agent_result.get("metadata") or {}
-    messages = metadata.get("messages") or []
+    raw_messages = metadata.get("messages") or []
+
+    # Phase 1 (context management) changed metadata.messages from an OpenAI-format
+    # role/content list to the raw event list (event_type-discriminated dicts, no
+    # "role" key). Detect which shape this job has and dispatch accordingly, so
+    # pre-Phase-1 job directories (e.g. the baseline-of-record jobs every later
+    # gate compares against) still render instead of dumping raw JSON.
+    is_event_shape = bool(raw_messages) and "event_type" in raw_messages[0]
+    if is_event_shape:
+        turns: list[dict[str, Any]] = []
+        if metadata.get("system_prompt"):
+            turns.append({"kind": "system", "text": metadata["system_prompt"]})
+        if metadata.get("instruction"):
+            turns.append({"kind": "task", "text": metadata["instruction"]})
+        turns.extend(classify_events(raw_messages))
+    else:
+        turns = classify_messages(raw_messages)
+
     verifier_result = data.get("verifier_result") or {}
     reward = (verifier_result.get("rewards") or {}).get("reward")
     exception_info = data.get("exception_info")
@@ -155,7 +245,7 @@ def build_trial_record(task_name: str, trial_name: str, data: dict[str, Any]) ->
         "exception_traceback": (exception_info or {}).get("exception_traceback"),
         "total_duration_sec": duration_sec(data.get("started_at"), data.get("finished_at")),
         "timing": timing,
-        "turns": classify_messages(messages),
+        "turns": turns,
     }
 
 
