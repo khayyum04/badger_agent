@@ -5,7 +5,7 @@ Launchers for running the agent under Harbor, plus dev/verification utilities (j
 
 ## Contents
 - `run_baseline.sh` — runs the agent on the 10-task `terminal-bench-sample@2.0` set, or one task if a name is given as `$1`; remaining args pass through to `harbor run`. `N_CONCURRENT` defaults to 1.
-- `run_subset.sh` — runs the official public subset: reads `../eval/public_subset.txt`, builds `-i <task>` flags (strips `#` comments), runs against `terminal-bench@2.0`. `N_CONCURRENT` defaults to 2. Self-reported leaderboard score comes from this.
+- `run_subset.sh` — runs the official public subset: reads `../eval/public_subset.txt`, builds `-i <task>` flags (strips `#` comments), runs against `terminal-bench@2.0`. `N_CONCURRENT` defaults to 2. Self-reported leaderboard score comes from this. `SUBSET_FILE=eval/dev_subset.txt` swaps in another list (path relative to `starter/`).
 - `build_dashboard.py` — `python build_dashboard.py <job_dir> [-o out.html] [--open]`; renders every trial's `result.json` plus full transcript into one static, dependency-free HTML file (default `<job_dir>/dashboard.html`).
 - `estimate_vram.py` — estimates a model's "reported VRAM" = Hub weight file sizes + 16k-token fp16 KV cache + 2 GB headroom. Needs network to huggingface.co.
 - `check_vram_table.py` — parses the approved-model table in the *root* `README.md` and compares each row against `estimate_vram.py`; exits nonzero on gaps over `--tolerance` (default 4 GB).

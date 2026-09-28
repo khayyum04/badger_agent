@@ -4,10 +4,11 @@
 #
 #   ./scripts/run_subset.sh
 #   ./scripts/run_subset.sh -m ollama/qwen2.5-coder:32b   # extra flags pass through
+#   SUBSET_FILE=eval/dev_subset.txt ./scripts/run_subset.sh   # any task list (path relative to starter/)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-SUBSET_FILE="eval/public_subset.txt"
+SUBSET_FILE="${SUBSET_FILE:-eval/public_subset.txt}"
 
 include_flags=()
 while IFS= read -r line; do

@@ -1,0 +1,44 @@
+# Dev subset: 30 tasks, stratified by baseline failure mode, for fast A/B iteration.
+# Source: combined 89-task baseline (full-89-0924 + rerun-21-0926 + rerun-13-0927), commit 1b30b32.
+# See starter/docs/research/full-sweep-analysis.md. Same format as public_subset.txt (# = comment).
+# Baseline cost of one pass over these 30: ~42.9M tokens, ~8.4 agent-hours (~4.2h wall at -n 2).
+# Always run with --environment-build-timeout-multiplier 6 (mteb-*, sam-cell-seg images are large).
+
+# Context overflow: all 6 (~25.9M tokens, 60% of this subset's cost)
+circuit-fibsqrt
+fix-ocaml-gc
+regex-chess
+schemelike-metacircular-eval
+video-processing
+winning-avg-corewars
+
+# Finished but wrong (TASK_COMPLETE, tests failed): all 10
+build-pov-ray
+configure-git-webserver
+filter-js-from-html
+llm-inference-batching-scheduler
+qemu-alpine-ssh
+query-optimize
+build-pmars
+mteb-leaderboard
+mteb-retrieve
+sam-cell-seg
+
+# Agent timeout: 6 of 31 (900s budget, few turns = slow turns; last two are nudge-heavy)
+polyglot-rust-c
+prove-plus-comm
+write-compressor
+qemu-startup
+model-extraction-relu-logits
+gpt2-codegolf
+
+# Passes, for regression detection: 4 short, 4 long/expensive
+fix-git
+pypi-server
+log-summary-date-ranges
+crack-7z-hash
+reshard-c4-data
+mcmc-sampling-stan
+build-cython-ext
+regex-log
+# regex-log passed but hit AgentTimeoutError: solved, never declared done (time awareness)
