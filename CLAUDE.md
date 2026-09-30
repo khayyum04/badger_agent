@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is our team's repo for the **Efficient Coder** competition (ML+X, UW–Madison, Kaggle): build an autonomous coding agent on top of an *approved open-weight model* (7–37 GB class) and score it on Terminal-Bench 2.0 (89 tasks) via [Harbor](https://www.harborframework.com/). The repo root holds the competition spec (`README.md`, `RULES.md`, `FAQ.md`, `RESOURCES.md`, `WRITEUP_TEMPLATE.md`).
 
-**The main agent is `mini_agent/`**: [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) (pinned PyPI `2.4.6`) run as a Harbor external agent. All new agent work happens there; read `mini_agent/CLAUDE.md` first. `starter/` holds the original starter ReAct agent, kept as a reference implementation, plus the shared docs (`starter/docs/`, including `research/`) and task lists (`starter/eval/`). Why we switched: `starter/docs/research/mini-30-vs-baseline.md`.
+**The main agent is `mini_agent/`**: [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) (pinned PyPI `2.4.6`) run as a Harbor external agent. All new agent work happens there; read `mini_agent/CLAUDE.md` first. `starter/` holds the original starter ReAct agent, kept as a reference implementation, plus the task lists (`starter/eval/`). `docs/` holds the guides shared by both agents (setup, 1Password, endpoint, Harbor, safety, troubleshooting) and `docs/research/` (run analyses). Why we switched: `docs/research/mini-30-vs-baseline.md`.
 
 The scoring formula matters for how you should optimize the agent: `leaderboard_score = TB_score − 0.01 × (total_tokens / 1,000,000)`. Capability improvements dominate; token-hungry changes (extra self-critique passes, verbose prompts) have a real but small cost.
 
@@ -21,9 +21,9 @@ cp mini_agent/.env.op.example mini_agent/.env.op   # 1Password references for LL
 uv pip install -e starter/                         # optional: the reference starter agent
 ```
 
-**Team standard for the hosted endpoint:** credentials come from 1Password, not a plaintext `.env`. Launch anything that calls the model as `op run --env-file=mini_agent/.env.op -- <command>`. `op://` references only resolve through `op run` — never put them in a `.env`. `mini_agent` loads its `.env` with `override=False`, so `op run` values win; the starter's `llm.py` loads `starter/.env` with `override=True`, so for the starter never leave active `LLM_BASE_URL`/`LLM_MODEL`/`LLM_API_KEY` lines in `starter/.env`. Full guide: `starter/docs/1password.md`.
+**Team standard for the hosted endpoint:** credentials come from 1Password, not a plaintext `.env`. Launch anything that calls the model as `op run --env-file=mini_agent/.env.op -- <command>`. `op://` references only resolve through `op run` — never put them in a `.env`. `mini_agent` loads its `.env` with `override=False`, so `op run` values win; the starter's `llm.py` loads `starter/.env` with `override=True`, so for the starter never leave active `LLM_BASE_URL`/`LLM_MODEL`/`LLM_API_KEY` lines in `starter/.env`. Full guide: `docs/1password.md`.
 
-Requires Docker running (Harbor spins up a fresh container per task) and Python 3.12+. Full fresh-machine walkthrough: `starter/docs/walkthrough.md`.
+Requires Docker running (Harbor spins up a fresh container per task) and Python 3.12+. Full fresh-machine walkthrough: `docs/walkthrough.md`.
 
 ## Commands
 
@@ -82,7 +82,7 @@ starter/agent/
 
 Key contracts and invariants, since they're easy to break silently:
 
-- **The agent never touches the host filesystem.** The only way it affects anything is `environment.exec(command=..., timeout_sec=...)` inside the task's disposable Docker container. Don't add code paths that shell out locally to "test faster" — see `starter/docs/safety.md`.
+- **The agent never touches the host filesystem.** The only way it affects anything is `environment.exec(command=..., timeout_sec=...)` inside the task's disposable Docker container. Don't add code paths that shell out locally to "test faster" — see `docs/safety.md`.
 - **One action per turn, by construction.** `tools.parse_action()` looks for a fenced ` ```bash ` block first; only if none is found does it check for the literal `TASK_COMPLETE` marker. A code block always wins, so the model can discuss finishing without accidentally ending the task. Anything else → `Action(kind="none")` → `agent.py` appends `NUDGE_MESSAGE` and loops.
 - **`context` (an `AgentContext`) must be updated every turn, not just at the end.** Harbor reads it after `run()` returns *or times out*, so token counts and `context.metadata` (which the baseline uses to snapshot `turns`, `finished`, and the full `messages` list) need to reflect partial progress at every iteration — this is how a mid-run timeout still produces usable `result.json` data.
 - **Output truncation is blunt on purpose.** `tools.MAX_OBSERVATION_CHARS` (6000) keeps only the first/last half of long command output with an omission marker in between. This is a named improvement target, not an oversight.
@@ -94,10 +94,10 @@ Key contracts and invariants, since they're easy to break silently:
 - **No task-specific hardcoding.** One system prompt, one agent loop, no `if task_name == "fix-git"` branches. Detecting a task *category* from the instruction text and adjusting strategy generically is fine; hardcoding a solution or prompt for an individual task is grounds for disqualification (all 89 tasks are public and the top 5 submissions get code-reviewed).
 - **Approved models only for the submitted run** (dev/prototyping is unrestricted). No closed-weight model anywhere in the system, including "just as a planner" — see the approved list and quantization-equivalence rules in the root `README.md`.
 - Any endpoint change is a `.env` / `.env.op` edit (`LLM_BASE_URL`/`LLM_MODEL`/`LLM_API_KEY`), never a code change — that portability is intentional and should be preserved when extending `mini_agent/badger_mini/harbor_agent.py` (or the starter's `llm.py`).
-- Real keys never go in a committed file. The hosted key is loaded via 1Password (`mini_agent/.env.op` / `starter/.env.op`, gitignored; the `.env.op.example` files are the committed templates). If someone uses a plaintext key in the gitignored `starter/.env` instead, treat any key an agent might have `cat`'d as burned (see `starter/docs/safety.md`).
+- Real keys never go in a committed file. The hosted key is loaded via 1Password (`mini_agent/.env.op` / `starter/.env.op`, gitignored; the `.env.op.example` files are the committed templates). If someone uses a plaintext key in the gitignored `starter/.env` instead, treat any key an agent might have `cat`'d as burned (see `docs/safety.md`).
 
 ## Where the improvement levers are
 
-For the main agent, the open problems measured on the 30-task subset are listed at the end of `starter/docs/research/mini-30-vs-baseline.md`: token cost (the full history is re-sent every turn), retries after a reasoning overrun, and output quality before submitting. Measure every change on a fixed task list against the current `mini_agent` result, one change at a time.
+For the main agent, the open problems measured on the 30-task subset are listed at the end of `docs/research/mini-30-vs-baseline.md`: token cost (the full history is re-sent every turn), retries after a reasoning overrun, and output quality before submitting. Measure every change on a fixed task list against the current `mini_agent` result, one change at a time.
 
-The general levers from `starter/README.md`, roughly in order of effort: `prompts.py` (instructions, task-type hints, output discipline) → context management (the conversation grows every turn — what to keep/summarize/drop) → error recovery (the baseline just shows the error and hopes) → planning/self-critique (separate plan/act steps, verify before declaring done) → model choice/quantization → architecture (multi-stage pipelines, retrieval, or switching to an *installed* agent per `starter/docs/harbor.md` for custom in-container tooling).
+The general levers from `starter/README.md`, roughly in order of effort: `prompts.py` (instructions, task-type hints, output discipline) → context management (the conversation grows every turn — what to keep/summarize/drop) → error recovery (the baseline just shows the error and hopes) → planning/self-critique (separate plan/act steps, verify before declaring done) → model choice/quantization → architecture (multi-stage pipelines, retrieval, or switching to an *installed* agent per `docs/harbor.md` for custom in-container tooling).

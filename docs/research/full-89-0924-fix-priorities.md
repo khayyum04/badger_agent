@@ -141,11 +141,11 @@ table above, not because they don't matter. They're judged by the
 - a timestamp
 - the resolved model id
 
-Change `llm.chat()`'s return value ([`llm.py` L131–155](../../agent/llm.py#L131-L155)) and the
-metadata update ([`agent.py` L153–157](../../agent/agent.py#L153-L157)). Keep
+Change `llm.chat()`'s return value ([`llm.py` L131–155](../../starter/agent/llm.py#L131-L155)) and the
+metadata update ([`agent.py` L153–157](../../starter/agent/agent.py#L153-L157)). Keep
 `scripts/build_dashboard.py` working.
 
-**Switch to `Qwen3.6-27B-FP8`** in the same step (`starter/docs/uw_madison_endpoint.md`). Every
+**Switch to `Qwen3.6-27B-FP8`** in the same step (`docs/uw_madison_endpoint.md`). Every
 later measurement should be on the approved model.
 
 **Why.**
@@ -169,8 +169,8 @@ message is the one place it also nudges behavior.
 1. **Detect overruns.** When `finish_reason == "length"` and the answer is empty, the turn is an
    overrun.
 2. **Never run or keep the cut-off thinking.** Remove the fallback at
-   [`llm.py` L148](../../agent/llm.py#L148), so it is never parsed and never appended to the
-   history ([`agent.py` L159](../../agent/agent.py#L159)). Log it in metadata instead.
+   [`llm.py` L148](../../starter/agent/llm.py#L148), so it is never parsed and never appended to the
+   history ([`agent.py` L159](../../starter/agent/agent.py#L159)). Log it in metadata instead.
 3. **Retry with a targeted message**, for example: *"You ran out of thinking budget before giving a
    command. Don't work it out in your head; take one small step and run a short script that tests
    one idea. Reply with one short bash block."*
@@ -245,7 +245,7 @@ change).
 
 ### Fix 3: Harden the parser
 
-**Build** (in [`tools.py`](../../agent/tools.py#L41-L96), mirrored in `scripts/build_dashboard.py`):
+**Build** (in [`tools.py`](../../starter/agent/tools.py#L41-L96), mirrored in `scripts/build_dashboard.py`):
 
 - **Pair fences in order**, so a closing fence can't be taken for an opening one.
 - **Accept only ```` ```bash ````, `sh` or `shell` blocks.**
@@ -267,7 +267,7 @@ change).
 
 ### Fix 4: Crash safety and per-task budgets
 
-**Build** (in [`agent.py`](../../agent/agent.py#L141-L184)):
+**Build** (in [`agent.py`](../../starter/agent/agent.py#L141-L184)):
 
 - **Catch errors from `llm.chat()`.**
   - On a context-overflow error: trim harder and retry once, otherwise return normally so the
@@ -322,7 +322,7 @@ change).
 
 - **Raise `AGENT_COMMAND_TIMEOUT_SEC`** to 180–300 s (an `.env` change).
 - **Keep the output when a command times out.** In
-  [`run_shell`](../../agent/tools.py#L108-L143), send output to a file so a timeout still returns
+  [`run_shell`](../../starter/agent/tools.py#L108-L143), send output to a file so a timeout still returns
   the partial output, and say whether the process is still running.
 - **Prompt:** start builds and training runs in the background with a log file, then wait with one
   blocking command (for example `timeout 240 tail --pid=<PID> -f /dev/null; tail -20 log`)
@@ -359,7 +359,7 @@ start servers in the background.
 
 ### Fix 8: Hygiene prompt additions
 
-**Build.** Add to [`prompts.py`](../../agent/prompts.py#L31-L70):
+**Build.** Add to [`prompts.py`](../../starter/agent/prompts.py#L31-L70):
 
 - *"Build and test in /tmp, not in the output directory."*
 - *"For performance targets, benchmark at least two alternatives."*
@@ -455,7 +455,7 @@ hypothesis, not a finding.
 **Build.**
 
 - Set `LLM_TEMPERATURE` to the model card's thinking-mode setting (as I recall, about 0.6).
-- Add `top_p` (about 0.95) as one argument in [`llm.py`](../../agent/llm.py#L131-L136).
+- Add `top_p` (about 0.95) as one argument in [`llm.py`](../../starter/agent/llm.py#L131-L136).
 - Check both values for the exact checkpoint you use.
 
 **Why.**
@@ -469,7 +469,7 @@ hypothesis, not a finding.
 
 ### C3: Prompt lines that change how it thinks
 
-**Build.** Add to the STRATEGY section of [`prompts.py`](../../agent/prompts.py#L36-L45):
+**Build.** Add to the STRATEGY section of [`prompts.py`](../../starter/agent/prompts.py#L36-L45):
 
 - *"Use the machine: when you need to compute, decode, simulate or search, write a short script
   and run it instead of working it out in your head."*

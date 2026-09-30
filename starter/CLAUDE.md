@@ -1,13 +1,12 @@
 # starter/
 
 ## Purpose
-The original starter kit: an installable Python package (`pyproject.toml`) containing the starter ReAct agent, the scripts that launch and inspect its runs, and the eval task lists. **The team's main agent is now `../mini_agent/`** (mini-swe-agent); this agent is kept as a reference implementation, and `docs/` and `eval/` here are shared by both. Repo-level setup, competition rules, and commands live in the root `CLAUDE.md`.
+The original starter kit: an installable Python package (`pyproject.toml`) containing the starter ReAct agent, the scripts that launch and inspect its runs, and the eval task lists. **The team's main agent is now `../mini_agent/`** (mini-swe-agent); this agent is kept as a reference implementation, and `eval/` here is shared by both. The guides that used to live in `starter/docs/` are now in the repo-root `../docs/`. Repo-level setup, competition rules, and commands live in the root `CLAUDE.md`.
 
 ## Contents
 - `agent/` — the product: `BaselineAgent` loop, prompts, action parsing/execution, OpenAI-compatible LLM client. See `agent/CLAUDE.md`.
 - `scripts/` — `run_baseline.sh` (10-task sample) and `run_subset.sh` (official subset) launchers, `build_dashboard.py` job viewer, and two VRAM-eligibility utilities. See `scripts/CLAUDE.md`.
 - `eval/public_subset.txt` — task names consumed by `run_subset.sh`. Currently 3 placeholders until the official list is announced at kickoff.
-- `docs/` — human-facing guides (not source; read on demand): `walkthrough.md` (fresh-machine setup), `harbor.md`, `safety.md`, `troubleshooting.md`, `byo_model.md`, `uw_madison_endpoint.md`, `1password.md` (hosted endpoint via `op run`, end to end).
 - `.env.example`, `.env.op.example` — committed templates for local Ollama settings and 1Password references for the hosted endpoint. Real `.env`/`.env.op` are gitignored.
 - `pyproject.toml`, `README.md`, `.gitignore` — packaging, starter overview, ignores (`.env`, `.venv/`, `jobs/`).
 

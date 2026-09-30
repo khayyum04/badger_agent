@@ -104,7 +104,7 @@ the [plan of work](full-89-0924-fix-priorities.md#plan-of-work).
   those stop mid-sentence, and their lengths cluster at 20–34K characters, which is about 8,192
   tokens.
 
-That is exactly what [`llm.py` L137–148](../../agent/llm.py#L137-L148) produces when the answer
+That is exactly what [`llm.py` L137–148](../../starter/agent/llm.py#L137-L148) produces when the answer
 comes back empty: it substitutes the cut-off thinking. **Overrun turn** in this doc means a reply of
 10K+ characters without a leading newline.
 
@@ -188,11 +188,11 @@ task would plausibly pass once that weakness is fixed.
 empty answer, and three things go wrong:
 
 - **`llm.py` swaps in the unfinished thinking** as the reply
-  ([L137–148](../../agent/llm.py#L137-L148)).
+  ([L137–148](../../starter/agent/llm.py#L137-L148)).
 - **`agent.py` keeps it in the history**, where it is re-sent on every later turn
-  ([L159](../../agent/agent.py#L159)).
+  ([L159](../../starter/agent/agent.py#L159)).
 - **`tools.py` runs the first code-fence-like text it finds in it**
-  ([L89–96](../../agent/tools.py#L89-L96)).
+  ([L89–96](../../starter/agent/tools.py#L89-L96)).
 
 **Evidence**
 
@@ -255,14 +255,14 @@ hard anyway. The plausible recoveries are `raman-fitting`, `video-processing`, `
 ### W2: Full history is re-sent every turn, with no budget
 
 **What happens.** Every call re-sends the system prompt, the instruction and every earlier message
-([`agent.py` L131–184](../../agent/agent.py#L131-L184)). The agent has no token budget, doesn't
+([`agent.py` L131–184](../../starter/agent/agent.py#L131-L184)). The agent has no token budget, doesn't
 track elapsed time, and never compacts the history.
 
 **Evidence**
 
 - **Command output is 26% of input.** Outputs are usually small (median 346 characters), but the 8%
   over 4K characters make up 44% of that. Only 103 hit the 6,000-character cap
-  ([`tools.py` L99–105](../../agent/tools.py#L99-L105)).
+  ([`tools.py` L99–105](../../starter/agent/tools.py#L99-L105)).
 - **Old replies are another 11%** of input.
 - **Failing trials cost about 8× passing ones** (median 1.38M vs 173K tokens), and 18 failing
   trials used more than 1.5M each.
@@ -292,7 +292,7 @@ created the output file the tests check.**
 
 **What happens.** A command that runs past 60 s returns only
 `[command did not complete: …]`, and all its output is lost
-([`tools.py` L131–134](../../agent/tools.py#L131-L134)). The process keeps running (for example,
+([`tools.py` L131–134](../../starter/agent/tools.py#L131-L134)). The process keeps running (for example,
 still holding the `apt` lock). So the model backgrounds its jobs and polls with `sleep`, which
 costs a full LLM call per poll.
 
@@ -307,14 +307,14 @@ costs a full LLM call per poll.
 
 ### W5: The action parser is fragile
 
-**What happens.** In [`CODE_BLOCK_RE`](../../agent/tools.py#L41), the `bash` tag is optional, and
+**What happens.** In [`CODE_BLOCK_RE`](../../starter/agent/tools.py#L41), the `bash` tag is optional, and
 the parser takes the first match.
 
 - **Prose runs as bash.** After a ` ```python ` or ` ```c ` block, the closing fence matches as an
   *opening* one, and the prose after it gets run: **165 times**, all inside overrun text.
 - **Untagged blocks are almost never real commands.** Of 251 run, 249 failed.
 - **`TASK_COMPLETE` counts anywhere in the text**
-  ([L94](../../agent/tools.py#L94)), even inside cut-off thinking.
+  ([L94](../../starter/agent/tools.py#L94)), even inside cut-off thinking.
 - **Only the first block runs.** 22 replies had more than one.
 
 For comparison, `bash`-tagged blocks in normal replies succeed 87% of the time. The dashboard's

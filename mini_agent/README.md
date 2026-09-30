@@ -7,7 +7,7 @@ task container.
 
 It replaced the starter ReAct agent in [`../starter/`](../starter/) as our baseline. On the same 30
 tasks it passed 15 against the starter agent's 10, with no ungraded crashes. The comparison is in
-[`../starter/docs/research/mini-30-vs-baseline.md`](../starter/docs/research/mini-30-vs-baseline.md).
+[`../docs/research/mini-30-vs-baseline.md`](../docs/research/mini-30-vs-baseline.md).
 
 ## Layout
 
@@ -21,7 +21,7 @@ tasks it passed 15 against the starter agent's 10, with no ungraded crashes. The
 
 ## What it fixes compared with the starter agent
 
-| Starter weakness ([analysis](../starter/docs/research/full-89-0924-failure-analysis.md)) | Here |
+| Starter weakness ([analysis](../docs/research/full-89-0924-failure-analysis.md)) | Here |
 |---|---|
 | W1/W5: cut-off thinking run as a command and kept in history | Native tool calls. A reply with no tool call is dropped from history and replaced by a short "take one small step" note |
 | W5: `TASK_COMPLETE` matched anywhere | The task ends only when a command's output starts with `COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` |

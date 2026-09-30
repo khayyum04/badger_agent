@@ -7,7 +7,7 @@ The team's main agent: mini-swe-agent (pinned PyPI `2.4.6`) wired into Harbor as
 - `badger_mini/harbor_agent.py` — `BadgerMiniAgent` (Harbor `BaseAgent`), `HarborEnvironment` (mini-swe-agent environment over `environment.exec()`), `HarborSyncedAgent` (`DefaultAgent` that mirrors token usage into Harbor's `AgentContext`), `BadgerLitellmModel` (no retries on 400s).
 - `badger_mini/config/terminal_bench.yaml` — prompts, `step_limit`, command `timeout`, observation and format-error templates. Selected by `BADGER_CONFIG` (default this file).
 - `scripts/` — `run_sample.sh`, `run_subset.sh <list>`, `run_full.sh`, `check_endpoint.sh`, `score.sh <job-dir>`; all `cd` into `mini_agent/` and write to `mini_agent/jobs/`.
-- `eval/experiment_subset.txt` — the 30 tasks behind `../starter/docs/research/mini-30-vs-baseline.md`.
+- `eval/experiment_subset.txt` — the 30 tasks behind `../docs/research/mini-30-vs-baseline.md`.
 - `.env.example`, `.env.op.example` — committed templates; real `.env` / `.env.op` are gitignored.
 
 ## How it fits in

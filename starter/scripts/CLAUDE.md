@@ -21,6 +21,6 @@ the two VRAM scripts serve competition model-eligibility questions, not agent de
 - `run_subset.sh` pulls the full `terminal-bench@2.0` dataset, not the sample one.
 - `../eval/public_subset.txt` (one task name per line, `#` comments ignored) currently holds 3 **placeholder** tasks; the official list is announced at kickoff, so don't treat its score as the real leaderboard number. The script errors only if the file yields zero names — unknown names aren't checked here.
 - `build_dashboard.py` re-declares `CODE_BLOCK_RE`, `NUDGE_MESSAGE`, and the observation prefix/suffix from `agent/tools.py` and `agent/prompts.py`; it silently mis-renders transcripts if those change and this file isn't updated.
-- Dashboards contain raw transcripts (anything the agent `cat`'d, possibly secrets) — local only, never upload or publish (`starter/docs/safety.md`).
+- Dashboards contain raw transcripts (anything the agent `cat`'d, possibly secrets) — local only, never upload or publish (`docs/safety.md`).
 - `check_vram_table.py` imports `estimate_vram` via `sys.path` and locates the README as `parents[2]` (repo root) — moving either script breaks it.
 - The table value stays canonical for scoring; the VRAM scripts are transparency tools, and small gaps are expected.

@@ -5,7 +5,7 @@ This compares the first mini-swe-agent run with the baseline's full 89-task run
 [experiment subset](full-89-0924-fix-priorities.md#experiment-subset). For each weakness (W1–W9) and
 cause fix (C0–C6) from the research, it says whether mini-swe-agent addressed it, with numbers.
 
-- **Sources:** job `2026-09-27__12-44-55` (mini-swe-agent, run from the prototype fork
+- **Sources:** `mini_agent/jobs/2026-09-27__12-44-55/` (mini-swe-agent, run from the prototype fork
   `khayyum04/badger_mini_agent`; the same code now lives in `mini_agent/`) and `jobs/full-89-0924/`
   (baseline). `jobs/` is gitignored, so both are local to Khayyum's machine.
 - **Method:** the research's own definitions, applied to both runs. See [Method](#method).
