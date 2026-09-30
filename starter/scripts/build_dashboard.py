@@ -7,7 +7,7 @@ in `agent_result.metadata.messages` -- into one static HTML file with no externa
 dependencies, so it can be opened directly via `file://`.
 
 This is a local-only dev tool: transcripts can contain anything the agent `cat`'d
-inside the container (see starter/docs/safety.md), so the output is never
+inside the container (see docs/safety.md), so the output is never
 uploaded or published anywhere -- just written next to the job data.
 
 Usage

@@ -20,7 +20,7 @@ is reproduced in full in §1 so the analysis doesn't depend on a script that isn
   that's a real absence in the data, not a claim that such failures can't happen elsewhere.
 - The exact `LLM_MODEL` / `LLM_BASE_URL` used for these 4 runs is **not recorded** in any
   `result.json` (`agent_info.model_info` is `null`, `config.agent.model_name` is `null` — see
-  §6). `starter/CLAUDE.md`, `starter/docs/uw_madison_endpoint.md`, and `plan.md` all point at the
+  §6). `starter/CLAUDE.md`, `docs/uw_madison_endpoint.md`, and `plan.md` all point at the
   hosted `Qwen3.6-27B-FP8` reasoning-model endpoint as the intended target, and the transcripts'
   style (long chain-of-thought, self-narrated "I'm going in circles" text — §3.3) is consistent
   with a reasoning model, but this is **inference**, not a value read from the artifacts. Flagged
@@ -118,8 +118,8 @@ abbreviated for table width.)
 - **0/40 trials show an empty assistant response** (`message.content` coming back `""` and
   triggering `llm.py`'s `reasoning_content` fallback — checked directly against
   `agent_result.metadata.messages`, counting assistant messages with empty/whitespace-only
-  content). This is the exact failure mode `starter/docs/troubleshooting.md` and
-  `starter/docs/uw_madison_endpoint.md` document ("every assistant response is empty ... output
+  content). This is the exact failure mode `docs/troubleshooting.md` and
+  `docs/uw_madison_endpoint.md` document ("every assistant response is empty ... output
   token count will be exactly `turns × LLM_MAX_TOKENS`") — **it is not what's happening in this
   dataset.** Whatever `LLM_MAX_TOKENS` these 4 runs used, it was high enough that `content` always
   came back non-empty. A *different*, currently undocumented failure mode dominates instead — see
@@ -303,12 +303,12 @@ per-job total-token totals in §2 drift upward in the same window. **This is an 
 directly-observed cause**: the exact `LLM_MAX_TOKENS`/model/endpoint config for each of the 4 dated
 runs isn't recorded in `result.json` (§0), so it can't be confirmed from these artifacts alone
 whether this drift is a config change (e.g. `LLM_MAX_TOKENS` raised per
-`starter/docs/uw_madison_endpoint.md`'s `8192` recommendation, between 2026-09-12 and 2026-09-21),
+`docs/uw_madison_endpoint.md`'s `8192` recommendation, between 2026-09-12 and 2026-09-21),
 a model/endpoint change, or model-server-side nondeterminism. What *is* directly observed: whatever
 changed, it made the wall-clock-timeout cluster more likely to burn its whole budget on fewer,
 larger turns, not fewer, so if the intent was fixing the empty-response bug (§2, confirmed absent
 in all 40 trials), it may have traded one `AgentTimeoutError` cause for another that isn't yet
-written down in `starter/docs/troubleshooting.md`.
+written down in `docs/troubleshooting.md`.
 
 **Code cross-reference:**
 - `starter/agent/llm.py`'s `chat()` sets `max_tokens=self.max_tokens` per call but has no
@@ -471,7 +471,7 @@ names or branching on them.
    tools, common Python libraries) in `setup()` — never conditioned on task name or instruction
    text — could shortcut some of this manual reverse-engineering without violating the
    no-task-specific-hardcoding rule. Lower confidence than items 1–3: it's not certain these tools
-   would be installable in the finale environment (`starter/docs/safety.md`/`agent.py`'s own
+   would be installable in the finale environment (`docs/safety.md`/`agent.py`'s own
    docstring warns finale tasks may have no network), so this is offered as worth investigating,
    not as a confirmed fix — and even with tools available, chess-best-move's core difficulty
    (deriving the position from an image, then finding a decisive move) may not shrink much. Token

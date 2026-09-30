@@ -19,7 +19,7 @@ with `prompts.py` supplying the strings. All improvement levers (prompts, contex
 recovery, self-critique) are edits here.
 
 ## Gotchas
-- **Never touch the host.** Only `environment.exec()` may affect anything (`starter/docs/safety.md`).
+- **Never touch the host.** Only `environment.exec()` may affect anything (`docs/safety.md`).
 - **`context` must be updated every turn** — tokens and `metadata` (`turns`, `finished`, `messages`) — so a timeout still yields a usable `result.json`. `messages` is stored by reference, so later appends show up automatically.
 - **Code block beats `TASK_COMPLETE`**, and `CODE_BLOCK_RE` also accepts *untagged* fences (not only ```` ```bash ````). An empty block falls through to the done check.
 - **Truncation is per stream, not per observation**: stdout and stderr are each capped at `MAX_OBSERVATION_CHARS` (6000, first/last half kept), so one observation can reach ~12k chars. Intentionally blunt; a named improvement target.
