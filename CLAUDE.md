@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-This is the starter kit for the **Efficient Coder** competition (ML+X, UW–Madison, Kaggle): build an autonomous coding agent on top of an *approved open-weight model* (7–37 GB class) and score it on Terminal-Bench 2.0 (89 tasks) via [Harbor](https://www.harborframework.com/). The repo root holds the competition spec (`README.md`, `RULES.md`, `FAQ.md`, `RESOURCES.md`, `WRITEUP_TEMPLATE.md`); all agent code lives under `starter/`.
+This is our team's repo for the **Efficient Coder** competition (ML+X, UW–Madison, Kaggle): build an autonomous coding agent on top of an *approved open-weight model* (7–37 GB class) and score it on Terminal-Bench 2.0 (89 tasks) via [Harbor](https://www.harborframework.com/). The repo root holds the competition spec (`README.md`, `RULES.md`, `FAQ.md`, `RESOURCES.md`, `WRITEUP_TEMPLATE.md`).
+
+**The main agent is `mini_agent/`**: [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) (pinned PyPI `2.4.6`) run as a Harbor external agent. All new agent work happens there; read `mini_agent/CLAUDE.md` first. `starter/` holds the original starter ReAct agent, kept as a reference implementation, plus the shared docs (`starter/docs/`, including `research/`) and task lists (`starter/eval/`). Why we switched: `starter/docs/research/mini-30-vs-baseline.md`.
 
 The scoring formula matters for how you should optimize the agent: `leaderboard_score = TB_score − 0.01 × (total_tokens / 1,000,000)`. Capability improvements dominate; token-hungry changes (extra self-critique passes, verbose prompts) have a real but small cost.
 
@@ -13,12 +15,13 @@ The scoring formula matters for how you should optimize the agent: `leaderboard_
 ```bash
 uv venv --python 3.12
 source .venv/bin/activate
-uv pip install -e starter/          # editable install — edits to agent/ take effect immediately
-cp starter/.env.example starter/.env  # non-secret settings (LLM_MAX_TOKENS, AGENT_*); local Ollama values
-cp starter/.env.op.example starter/.env.op  # hosted endpoint: 1Password references for LLM_BASE_URL / LLM_API_KEY
+uv pip install -e mini_agent/                      # main agent (pulls harbor + mini-swe-agent 2.4.6)
+cp mini_agent/.env.example mini_agent/.env         # non-secret tuning (LLM_MAX_TOKENS, sampling, AGENT_*)
+cp mini_agent/.env.op.example mini_agent/.env.op   # 1Password references for LLM_BASE_URL / LLM_API_KEY + LLM_MODEL
+uv pip install -e starter/                         # optional: the reference starter agent
 ```
 
-**Team standard for the hosted endpoint:** credentials come from 1Password, not a plaintext `.env`. Launch anything that calls the model as `op run --env-file=starter/.env.op -- <command>` (e.g. `op run --env-file=starter/.env.op -- ./starter/scripts/run_baseline.sh regex-log`). `op://` references only resolve through `op run` — never put them in `starter/.env`, and never leave active `LLM_BASE_URL`/`LLM_MODEL`/`LLM_API_KEY` lines in `starter/.env` when using `.env.op` (`llm.py` loads `.env` with `override=True` and would clobber the injected values). Full guide: `starter/docs/1password.md`.
+**Team standard for the hosted endpoint:** credentials come from 1Password, not a plaintext `.env`. Launch anything that calls the model as `op run --env-file=mini_agent/.env.op -- <command>`. `op://` references only resolve through `op run` — never put them in a `.env`. `mini_agent` loads its `.env` with `override=False`, so `op run` values win; the starter's `llm.py` loads `starter/.env` with `override=True`, so for the starter never leave active `LLM_BASE_URL`/`LLM_MODEL`/`LLM_API_KEY` lines in `starter/.env`. Full guide: `starter/docs/1password.md`.
 
 Requires Docker running (Harbor spins up a fresh container per task) and Python 3.12+. Full fresh-machine walkthrough: `starter/docs/walkthrough.md`.
 
@@ -28,10 +31,15 @@ Requires Docker running (Harbor spins up a fresh container per task) and Python 
 # Sanity-check Docker+Harbor+grading pipeline (no model involved — replays reference solutions)
 harbor run -d terminal-bench-sample@2.0 -a oracle
 
-# Run the agent on a single task (10-task sample dataset, fast iteration)
-harbor run -d terminal-bench-sample@2.0 --agent agent.agent:BaselineAgent -i <task-name>
+# Main agent (mini_agent/) — see mini_agent/README.md
+op run --env-file=mini_agent/.env.op -- ./mini_agent/scripts/check_endpoint.sh        # endpoint + tool calling, no Docker
+op run --env-file=mini_agent/.env.op -- ./mini_agent/scripts/run_sample.sh <task-name>  # one sample task
+op run --env-file=mini_agent/.env.op -- ./mini_agent/scripts/run_subset.sh <list-file> # list path relative to mini_agent/
+op run --env-file=mini_agent/.env.op -- ./mini_agent/scripts/run_full.sh --job-name <name>   # all 89
+./mini_agent/scripts/score.sh mini_agent/jobs/<job-name>                               # tb_score, tokens, leaderboard
 
-# Run the agent on all 10 sample tasks
+# Reference starter agent (starter/)
+harbor run -d terminal-bench-sample@2.0 --agent agent.agent:BaselineAgent -i <task-name>
 ./starter/scripts/run_baseline.sh
 ./starter/scripts/run_baseline.sh <task-name>          # or just one
 ./starter/scripts/run_baseline.sh <task-name> -m ollama/qwen2.5-coder:32b   # extra harbor flags pass through
@@ -44,19 +52,25 @@ harbor datasets list
 harbor run --help
 ```
 
-All `harbor run` invocations must be run from inside the activated venv, and `agent.agent:BaselineAgent`-style import paths only resolve because `starter/` was installed editable — if that import fails, re-run `uv pip install -e starter/` from the repo root.
+All `harbor run` invocations must be run from inside the activated venv. `badger_mini.harbor_agent:BadgerMiniAgent` and `agent.agent:BaselineAgent` only resolve because `mini_agent/` and `starter/` were installed editable — if an import fails, re-run the matching `uv pip install -e` from the repo root.
 
 Concurrency: `-n <N>` runs N tasks in parallel containers, all sharing one model endpoint — start at `-n 1`/`2` and watch RAM.
 
 ### Reading results
 
-Each `harbor run` writes `./jobs/<job-name>/<task>__<trial-id>/result.json`. Key fields: `verifier_result.rewards.reward` (0/1 score), `agent_result.n_input_tokens`/`n_output_tokens` (submission token count), `agent_result.metadata` (whatever the agent wrote to `context.metadata`, including the full message transcript), `exception_info`. `harbor view jobs` starts a local web viewer over the same data.
+Each `harbor run` writes `<jobs-dir>/<job-name>/<task>__<trial-id>/result.json` (`mini_agent/jobs/` for the mini_agent scripts; mini-swe-agent's full transcript is next to it in `agent/mini-swe-agent.trajectory.json`). Key fields: `verifier_result.rewards.reward` (0/1 score), `agent_result.n_input_tokens`/`n_output_tokens` (submission token count), `agent_result.metadata` (whatever the agent wrote to `context.metadata`, including the full message transcript), `exception_info`. `harbor view jobs` starts a local web viewer over the same data.
 
 To compute the three submission-card numbers (`tb_score`, `total_tokens`, task count) from a job directory, see the `jq` one-liners in the root `README.md` under "Computing your submission numbers."
 
 ## Architecture
 
-The agent is a **ReAct loop**: Harbor calls `BaselineAgent.run(instruction, environment, context)` once per task; the loop repeatedly (1) sends the full conversation to the LLM, (2) parses its response into exactly one action, (3) executes that action in the task's Docker container, (4) appends the output back into the conversation — until the model emits `TASK_COMPLETE` or `AGENT_MAX_TURNS` (default 100) is hit.
+### Main agent (`mini_agent/`)
+
+Harbor calls `BadgerMiniAgent.run()`, which runs mini-swe-agent's `DefaultAgent` in a daemon thread. The model returns native `bash` tool calls; each command is scheduled back onto Harbor's event loop and executed with `environment.exec()` inside the container (wrapped in `timeout` so partial output survives). A reply with no tool call (e.g. a reasoning overrun, `finish_reason=length`) raises `FormatError`: the reply is dropped from history and a short retry note is sent; 5 in a row ends the task. The task ends when a command's output starts with `COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`. Details and invariants: `mini_agent/CLAUDE.md`.
+
+### Reference starter agent (`starter/agent/`)
+
+The starter agent is a **ReAct loop**: Harbor calls `BaselineAgent.run(instruction, environment, context)` once per task; the loop repeatedly (1) sends the full conversation to the LLM, (2) parses its response into exactly one action, (3) executes that action in the task's Docker container, (4) appends the output back into the conversation — until the model emits `TASK_COMPLETE` or `AGENT_MAX_TURNS` (default 100) is hit.
 
 ```
 starter/agent/
@@ -79,9 +93,11 @@ Key contracts and invariants, since they're easy to break silently:
 
 - **No task-specific hardcoding.** One system prompt, one agent loop, no `if task_name == "fix-git"` branches. Detecting a task *category* from the instruction text and adjusting strategy generically is fine; hardcoding a solution or prompt for an individual task is grounds for disqualification (all 89 tasks are public and the top 5 submissions get code-reviewed).
 - **Approved models only for the submitted run** (dev/prototyping is unrestricted). No closed-weight model anywhere in the system, including "just as a planner" — see the approved list and quantization-equivalence rules in the root `README.md`.
-- Any endpoint change is a `.env` / `.env.op` edit (`LLM_BASE_URL`/`LLM_MODEL`/`LLM_API_KEY`), never a code change — that portability is intentional and should be preserved when extending `llm.py`.
-- Real keys never go in a committed file. The hosted key is loaded via 1Password (`starter/.env.op`, gitignored; `starter/.env.op.example` is the committed template). If someone uses a plaintext key in the gitignored `starter/.env` instead, treat any key an agent might have `cat`'d as burned (see `starter/docs/safety.md`).
+- Any endpoint change is a `.env` / `.env.op` edit (`LLM_BASE_URL`/`LLM_MODEL`/`LLM_API_KEY`), never a code change — that portability is intentional and should be preserved when extending `mini_agent/badger_mini/harbor_agent.py` (or the starter's `llm.py`).
+- Real keys never go in a committed file. The hosted key is loaded via 1Password (`mini_agent/.env.op` / `starter/.env.op`, gitignored; the `.env.op.example` files are the committed templates). If someone uses a plaintext key in the gitignored `starter/.env` instead, treat any key an agent might have `cat`'d as burned (see `starter/docs/safety.md`).
 
-## Where the improvement levers are (per `starter/README.md`)
+## Where the improvement levers are
 
-Roughly in order of effort: `prompts.py` (instructions, task-type hints, output discipline) → context management (the conversation grows every turn — what to keep/summarize/drop) → error recovery (the baseline just shows the error and hopes) → planning/self-critique (separate plan/act steps, verify before declaring done) → model choice/quantization → architecture (multi-stage pipelines, retrieval, or switching to an *installed* agent per `starter/docs/harbor.md` for custom in-container tooling).
+For the main agent, the open problems measured on the 30-task subset are listed at the end of `starter/docs/research/mini-30-vs-baseline.md`: token cost (the full history is re-sent every turn), retries after a reasoning overrun, and output quality before submitting. Measure every change on a fixed task list against the current `mini_agent` result, one change at a time.
+
+The general levers from `starter/README.md`, roughly in order of effort: `prompts.py` (instructions, task-type hints, output discipline) → context management (the conversation grows every turn — what to keep/summarize/drop) → error recovery (the baseline just shows the error and hopes) → planning/self-critique (separate plan/act steps, verify before declaring done) → model choice/quantization → architecture (multi-stage pipelines, retrieval, or switching to an *installed* agent per `starter/docs/harbor.md` for custom in-container tooling).

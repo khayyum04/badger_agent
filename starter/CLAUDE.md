@@ -1,7 +1,7 @@
 # starter/
 
 ## Purpose
-Root of the source tree for the Efficient Coder agent: an installable Python package (`pyproject.toml`) containing the ReAct agent Harbor runs, the scripts that launch and inspect runs, and the eval task list. Repo-level setup, competition rules, and commands live in the root `CLAUDE.md`.
+The original starter kit: an installable Python package (`pyproject.toml`) containing the starter ReAct agent, the scripts that launch and inspect its runs, and the eval task lists. **The team's main agent is now `../mini_agent/`** (mini-swe-agent); this agent is kept as a reference implementation, and `docs/` and `eval/` here are shared by both. Repo-level setup, competition rules, and commands live in the root `CLAUDE.md`.
 
 ## Contents
 - `agent/` — the product: `BaselineAgent` loop, prompts, action parsing/execution, OpenAI-compatible LLM client. See `agent/CLAUDE.md`.
