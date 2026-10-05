@@ -13,6 +13,8 @@ Settings (env vars; secrets come from ``op run --env-file=mini_agent/.env.op``, 
   LLM_LITELLM_PROVIDER                   litellm provider prefix for LLM_MODEL (default: openai)
   LLM_MAX_TOKENS, LLM_TEMPERATURE, LLM_TOP_P
   AGENT_MAX_TURNS, AGENT_COMMAND_TIMEOUT_SEC
+  AGENT_STRIP_REASONING                  on = don't re-send the model's earlier thinking (default: off)
+  AGENT_COMPACTION                       on = self-compaction, see compaction.py (default: off)
   BADGER_CONFIG                          agent yaml (default: config/terminal_bench.yaml)
 """
 
@@ -40,6 +42,8 @@ import litellm  # noqa: E402
 from minisweagent.models import get_model  # noqa: E402
 from minisweagent.models.litellm_model import LitellmModel  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
+
+from badger_mini.compaction import Compactor  # noqa: E402
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 # override=False: values injected by `op run` must win over anything in mini_agent/.env
@@ -132,9 +136,43 @@ class HarborEnvironment:
 
 
 class BadgerLitellmModel(LitellmModel):
-    """LitellmModel that doesn't retry 400s: a wrong model id or bad param never fixes itself."""
+    """LitellmModel that doesn't retry 400s: a wrong model id or bad param never fixes itself.
+
+    The two context-saving switches are set by BadgerMiniAgent.run() after construction
+    (get_model() deep-copies its config, so the shared Compactor can't be passed through it).
+    """
 
     abort_exceptions = [*LitellmModel.abort_exceptions, litellm.exceptions.BadRequestError]
+    strip_reasoning = False
+    compactor: Compactor | None = None
+
+    def _prepare_messages_for_api(self, messages: list[dict]) -> list[dict]:
+        if self.strip_reasoning:
+            # Stored replies carry their thinking (twice: reasoning_content and provider_specific_fields),
+            # and the gateway bills it as input on every later turn. The model thinks afresh each turn.
+            messages = [
+                {k: m[k] for k in ("role", "content", "tool_calls") if k in m} if m.get("role") == "assistant" else m
+                for m in messages
+            ]
+        return super()._prepare_messages_for_api(messages)
+
+    def _query(self, messages: list[dict[str, str]], **kwargs):
+        if not self.compactor:
+            return super()._query(messages, **kwargs)
+        # The parent hardcodes tools=[BASH_TOOL], so its call is repeated here with the compactor's tools.
+        return litellm.completion(
+            model=self.config.model_name,
+            messages=messages,
+            tools=self.compactor.tools(),
+            **(self.config.model_kwargs | kwargs | self.compactor.request_kwargs()),
+        )
+
+    def _parse_actions(self, response) -> list[dict]:
+        if self.compactor:
+            actions = self.compactor.parse(response.choices[0].message.tool_calls or [])
+            if actions is not None:
+                return actions
+        return super()._parse_actions(response)
 
 
 # Endpoint misconfiguration: fail the trial loudly instead of letting every task "finish" with no work.
@@ -159,10 +197,18 @@ class HarborSyncedAgent(DefaultAgent):
     in a FormatError (e.g. a reasoning overrun with no tool call) - those tokens are billed too.
     """
 
-    def __init__(self, *args, harbor_context: AgentContext, stop: threading.Event, **kwargs):
+    def __init__(
+        self,
+        *args,
+        harbor_context: AgentContext,
+        stop: threading.Event,
+        compactor: Compactor | None = None,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         self.harbor_context = harbor_context
         self._stop = stop
+        self.compactor = compactor
         self.n_input_tokens = 0
         self.n_output_tokens = 0
         self.n_cache_tokens = 0
@@ -170,7 +216,17 @@ class HarborSyncedAgent(DefaultAgent):
     def query(self) -> dict:
         if self._stop.is_set():
             raise RuntimeError("Harbor stopped the agent (task timeout)")
+        if self.compactor and (stage_message := self.compactor.stage_message(self.messages)):
+            self.add_messages(stage_message)
         return super().query()
+
+    def execute_actions(self, message: dict) -> list[dict]:
+        actions = message.get("extra", {}).get("actions", [])
+        if self.compactor and actions and actions[0].get("tool") == "self_compact":
+            self.messages = self.compactor.apply(self.messages, actions[0])
+            self._sync_context()
+            return []
+        return super().execute_actions(message)
 
     def add_messages(self, *messages: dict) -> list[dict]:
         for message in messages:
@@ -180,6 +236,10 @@ class HarborSyncedAgent(DefaultAgent):
             self.n_output_tokens += usage.get("completion_tokens") or 0
             self.n_cache_tokens += (usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0
         added = super().add_messages(*messages)
+        self._sync_context()
+        return added
+
+    def _sync_context(self):
         ctx = self.harbor_context
         ctx.n_input_tokens = self.n_input_tokens
         ctx.n_output_tokens = self.n_output_tokens
@@ -189,8 +249,10 @@ class HarborSyncedAgent(DefaultAgent):
             "n_messages": len(self.messages),
             "exit_status": (self.messages[-1].get("extra") or {}).get("exit_status", "") if self.messages else "",
             "trajectory_path": str(self.config.output_path),
+            "strip_reasoning": getattr(self.model, "strip_reasoning", False),
         }
-        return added
+        if self.compactor:
+            ctx.metadata["compactions"] = self.compactor.log
 
 
 def _load_config() -> dict:
@@ -266,13 +328,18 @@ class BadgerMiniAgent(BaseAgent):
             env_config["timeout"] = int(os.environ["AGENT_COMMAND_TIMEOUT_SEC"])
 
         stop = threading.Event()
+        strip_reasoning = os.environ.get("AGENT_STRIP_REASONING", "off").lower() == "on"
+        compactor = Compactor.from_env(archive_dir=self.logs_dir, reasoning_sent=not strip_reasoning)
         model = get_model(config=_model_config(config.get("model") or {}, self.model_name))
+        model.strip_reasoning = strip_reasoning
+        model.compactor = compactor
         env = HarborEnvironment(environment, asyncio.get_running_loop(), stop, **env_config)
         agent = HarborSyncedAgent(
             model,
             env,
             harbor_context=context,
             stop=stop,
+            compactor=compactor,
             output_path=self.logs_dir / "mini-swe-agent.trajectory.json",
             **agent_config,
         )

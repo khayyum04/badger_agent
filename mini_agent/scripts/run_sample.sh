@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 10-task Terminal-Bench sample (terminal-bench-sample@2.0), or one task from it.
 #   op run --env-file=mini_agent/.env.op -- ./mini_agent/scripts/run_sample.sh            # all 10
-#   op run --env-file=mini_agent/.env.op -- ./mini_agent/scripts/run_sample.sh fix-git    # one task
+#   op run --env-file=mini_agent/.env.op -- ./mini_agent/scripts/run_sample.sh chess-best-move    # one task
 # Extra harbor flags pass through after the task name.
 source "$(dirname "$0")/_common.sh"
 TASK="${1:-}"; [ $# -gt 0 ] && shift

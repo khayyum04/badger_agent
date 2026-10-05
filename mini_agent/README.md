@@ -14,7 +14,9 @@ tasks it passed 15 against the starter agent's 10, with no ungraded crashes. The
 | Path | What it is |
 |---|---|
 | `badger_mini/harbor_agent.py` | `BadgerMiniAgent`, the Harbor agent: runs mini-swe-agent's `DefaultAgent` in a worker thread, with a `HarborEnvironment` that sends each command through `environment.exec()` |
+| `badger_mini/compaction.py` | Self-compaction (off by default, `AGENT_COMPACTION=on`): the `self_compact` tool, the notice / warning / hard stages, and the history rebuild. Experiment, see [`../docs/plans/self-compaction-mvp.md`](../docs/plans/self-compaction-mvp.md) |
 | `badger_mini/config/terminal_bench.yaml` | Prompts, step limit, command timeout, observation and format-error templates |
+| `tests/` | Offline tests (`uv pip install -e "mini_agent/[dev]"`, then `pytest mini_agent/tests`) |
 | `.env.op.example` / `.env.example` | 1Password references for the endpoint / non-secret tuning. Copy to `.env.op` / `.env` (gitignored) |
 | `scripts/` | `run_sample.sh`, `run_subset.sh`, `run_full.sh`, `check_endpoint.sh`, `score.sh` |
 | `eval/experiment_subset.txt` | The 30-task list behind the comparison doc |
@@ -46,7 +48,7 @@ You also need Docker running, the `op` CLI connected to the 1Password app, and t
 
 ```bash
 op run --env-file=mini_agent/.env.op -- ./mini_agent/scripts/check_endpoint.sh      # no Docker needed
-op run --env-file=mini_agent/.env.op -- ./mini_agent/scripts/run_sample.sh fix-git   # one task
+op run --env-file=mini_agent/.env.op -- ./mini_agent/scripts/run_sample.sh chess-best-move   # one task
 op run --env-file=mini_agent/.env.op -- ./mini_agent/scripts/run_sample.sh           # 10 sample tasks
 op run --env-file=mini_agent/.env.op -- ./mini_agent/scripts/run_subset.sh eval/experiment_subset.txt
 op run --env-file=mini_agent/.env.op -- ./mini_agent/scripts/run_full.sh --job-name full-mini-v1
