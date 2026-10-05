@@ -5,6 +5,8 @@ The team's main agent: mini-swe-agent (pinned PyPI `2.4.6`) wired into Harbor as
 
 ## Contents
 - `badger_mini/harbor_agent.py` — `BadgerMiniAgent` (Harbor `BaseAgent`), `HarborEnvironment` (mini-swe-agent environment over `environment.exec()`), `HarborSyncedAgent` (`DefaultAgent` that mirrors token usage into Harbor's `AgentContext`), `BadgerLitellmModel` (no retries on 400s).
+- `badger_mini/compaction.py` — `Compactor`: self-compaction (`AGENT_COMPACTION=on`, default off). Owns the `self_compact` tool, the stage messages, parsing of `self_compact` calls and the history rebuild; all its model-facing text lives there, not in the YAML. One instance per task, shared by `HarborSyncedAgent` (stage check before each query, rebuild on a `self_compact` action) and `BadgerLitellmModel` (tool list, parsing). Experiment version: `../docs/plans/self-compaction-mvp.md`.
+- `tests/test_compaction.py` — offline tests with a scripted model (`uv pip install -e "mini_agent/[dev]"`, `pytest mini_agent/tests`).
 - `badger_mini/config/terminal_bench.yaml` — prompts, `step_limit`, command `timeout`, observation and format-error templates. Selected by `BADGER_CONFIG` (default this file).
 - `scripts/` — `run_sample.sh`, `run_subset.sh <list>`, `run_full.sh`, `check_endpoint.sh`, `score.sh <job-dir>`; all `cd` into `mini_agent/` and write to `mini_agent/jobs/`.
 - `eval/experiment_subset.txt` — the 30 tasks behind `../docs/research/mini-30-vs-baseline.md`.
@@ -19,4 +21,6 @@ The team's main agent: mini-swe-agent (pinned PyPI `2.4.6`) wired into Harbor as
 - Returning normally after a crash is deliberate (so the verifier still grades); `_is_config_error()` is the exception, so misconfigured runs fail loudly instead of "finishing" every task with no work.
 - The command wrapper uses `timeout -k 5 <t> bash -c` inside the container so partial output survives; Harbor's own timeout is `t + 30` as an outer bound.
 - `harbor_agent.py` depends on mini-swe-agent internals (`DefaultAgent.add_messages/query`, `LitellmModel.abort_exceptions`, the `finish_reason` variable in `format_error_template`). Bumping the `mini-swe-agent` pin needs a rerun.
+- With compaction on, `self.messages` is **replaced** at each compaction, so the trajectory file holds only the current history; what was replaced is in `agent/compaction-<n>.json`. Token counts are unaffected (they accumulate in `add_messages()`).
+- `AGENT_STRIP_REASONING=on` drops earlier thinking from what is *sent* (`_prepare_messages_for_api`); stored messages keep it.
 - No task-specific logic anywhere (competition rule): one config, one loop.
