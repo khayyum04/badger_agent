@@ -173,7 +173,6 @@ Add `pytest` as a dev dependency in `mini_agent/pyproject.toml` if it isn't one.
 
 ### Known limits
 
-- The full text of long outputs is no longer in the trajectory (it was in the container's file, which
-  is deleted with the container). Previews are enough for token analysis; debugging a single failure
-  may need a rerun.
+- The trajectory still keeps every full output: mini-swe-agent stores it in each tool message's
+  `extra.raw_output`, and `extra` is stripped before messages are sent to the model.
 - Harbor's outer timeout (`timeout + 30`) still loses all output, as today.

@@ -13,6 +13,7 @@ Settings (env vars; secrets come from ``op run --env-file=mini_agent/.env.op``, 
   LLM_LITELLM_PROVIDER                   litellm provider prefix for LLM_MODEL (default: openai)
   LLM_MAX_TOKENS, LLM_TEMPERATURE, LLM_TOP_P
   AGENT_MAX_TURNS, AGENT_COMMAND_TIMEOUT_SEC
+  AGENT_OUTPUT_LIMIT, AGENT_OUTPUT_HEAD, AGENT_OUTPUT_TAIL   output offloading (limit 0 = off)
   BADGER_CONFIG                          agent yaml (default: config/terminal_bench.yaml)
 """
 
@@ -46,6 +47,8 @@ PACKAGE_DIR = Path(__file__).resolve().parent
 load_dotenv(PACKAGE_DIR.parent / ".env", override=False)
 
 SUBMIT_MARKER = "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
+# First line of a command's output when the wrapper saved it to a file in the container; stripped in execute().
+SAVED_MARKER = "BADGER_OUTPUT_SAVED_7f3a"
 
 
 class HarborEnvironmentConfig(BaseModel):
@@ -54,6 +57,12 @@ class HarborEnvironmentConfig(BaseModel):
     cwd: str = ""
     """Working directory; empty = the task image's WORKDIR."""
     env: dict[str, str] = {}
+    output_limit: int = 2000
+    """Outputs longer than this (chars) are shown as a head/tail preview plus a file path; 0 = off."""
+    output_head: int = 500
+    output_tail: int = 1500
+    output_dir: str = "/tmp/agent_out"
+    """Where every command's full output is saved, inside the container."""
 
 
 class HarborEnvironment:
@@ -64,18 +73,15 @@ class HarborEnvironment:
         self._environment = environment
         self._loop = loop
         self._stop = stop
+        self._n_commands = 0
 
     def execute(self, action: dict, cwd: str = "", *, timeout: int | None = None) -> dict[str, Any]:
         if self._stop.is_set():
             raise RuntimeError("Harbor stopped the agent (task timeout)")
         timeout = timeout or self.config.timeout
-        # `timeout` kills the command inside the container but keeps what it printed so far;
-        # Harbor's own timeout (the outer bound) would discard all output.
-        inner = shlex.quote(action.get("command", ""))
-        command = (
-            f"if command -v timeout >/dev/null 2>&1; then timeout -k 5 {timeout} bash -c {inner}; "
-            f"else bash -c {inner}; fi"
-        )
+        self._n_commands += 1
+        path = f"{self.config.output_dir}/cmd_{self._n_commands}.log"
+        command = self._wrap(action.get("command", ""), timeout, path)
         start = time.monotonic()
         future = asyncio.run_coroutine_threadsafe(
             self._environment.exec(
@@ -88,11 +94,18 @@ class HarborEnvironment:
         )
         try:
             result = future.result()
-            output = {
-                "output": (result.stdout or "") + (result.stderr or ""),
-                "returncode": result.return_code,
-                "exception_info": "",
-            }
+            text = (result.stdout or "") + (result.stderr or "")
+            saved = text.startswith(SAVED_MARKER + "\n")
+            if saved:
+                text = text[len(SAVED_MARKER) + 1 :]
+            output = {"output": text, "returncode": result.return_code, "exception_info": ""}
+            if saved and len(text) > self.config.output_limit:
+                output |= {
+                    "output_head": text[: self.config.output_head],
+                    "output_tail": text[-self.config.output_tail :] if self.config.output_tail else "",
+                    "total_chars": len(text),
+                    "full_output_path": path,
+                }
             if result.return_code in (124, 137) and time.monotonic() - start >= timeout:
                 output["exception_info"] = (
                     f"The command was killed after the {timeout}s timeout; output so far is shown. "
@@ -108,6 +121,25 @@ class HarborEnvironment:
             }
         self._check_finished(output)
         return output
+
+    def _wrap(self, command: str, timeout: int, path: str) -> str:
+        # `timeout` kills the command inside the container but keeps what it printed so far;
+        # Harbor's own timeout (the outer bound) would discard all output.
+        inner = shlex.quote(command)
+        run = (
+            f"if command -v timeout >/dev/null 2>&1; then timeout -k 5 {timeout} bash -c {inner}; "
+            f"else bash -c {inner}; fi"
+        )
+        if self.config.output_limit <= 0:
+            return run
+        # Save the full output in the container so the model can grep it later; if the file can't be
+        # created, run the command as before (no marker, so execute() won't offload).
+        d, p = shlex.quote(self.config.output_dir), shlex.quote(path)
+        return (
+            f"if mkdir -p {d} 2>/dev/null && : > {p} 2>/dev/null; then "
+            f"{{ {run} ; }} > {p} 2>&1; rc=$?; echo {SAVED_MARKER}; cat {p}; exit $rc; "
+            f"else {run}; fi"
+        )
 
     def _check_finished(self, output: dict):
         lines = output.get("output", "").lstrip().splitlines(keepends=True)
@@ -264,6 +296,13 @@ class BadgerMiniAgent(BaseAgent):
         env_config = dict(config.get("environment") or {})
         if os.environ.get("AGENT_COMMAND_TIMEOUT_SEC"):
             env_config["timeout"] = int(os.environ["AGENT_COMMAND_TIMEOUT_SEC"])
+        for env_key, key in (
+            ("AGENT_OUTPUT_LIMIT", "output_limit"),
+            ("AGENT_OUTPUT_HEAD", "output_head"),
+            ("AGENT_OUTPUT_TAIL", "output_tail"),
+        ):
+            if os.environ.get(env_key):
+                env_config[key] = int(os.environ[env_key])
 
         stop = threading.Event()
         model = get_model(config=_model_config(config.get("model") or {}, self.model_name))
