@@ -8,7 +8,7 @@ This is our team's repo for the **Efficient Coder** competition (ML+X, UW–Madi
 
 **The main agent is `mini_agent/`**: [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) (pinned PyPI `2.4.6`) run as a Harbor external agent. All new agent work happens there; read `mini_agent/CLAUDE.md` first. `starter/` holds the original starter ReAct agent, kept as a reference implementation, plus the task lists (`starter/eval/`). `docs/` holds the guides shared by both agents (setup, 1Password, endpoint, Harbor, safety, troubleshooting) and `docs/research/` (run analyses). Why we switched: `docs/research/mini-30-vs-baseline.md`.
 
-The scoring formula matters for how you should optimize the agent: `leaderboard_score = TB_score − 0.01 × (total_tokens / 1,000,000)`. Capability improvements dominate; token-hungry changes (extra self-critique passes, verbose prompts) have a real but small cost.
+The scoring formula matters for how you should optimize the agent: `leaderboard_score = TB_score − min(0.01, 0.01 × tokens_per_task / 100,000,000)`, with `tokens_per_task = total_tokens / 89` (Kaggle evaluation page, updated Oct 2026; the copied `README.md` still shows the old uncapped formula). The cap is below one solved task (1/89 ≈ 0.0112), so **tokens are only a tiebreaker between agents with the same pass count**. Never trade a pass for tokens; judge experiments on passes first, tokens second. Report `total_tokens` as a raw integer and `leaderboard_score` to five decimals.
 
 ## Setup
 
