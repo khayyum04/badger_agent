@@ -12,7 +12,7 @@ from harbor.environments.base import ExecResult
 from jinja2 import StrictUndefined, Template
 from minisweagent.exceptions import Submitted
 
-from badger_mini.harbor_agent import PACKAGE_DIR, SAVED_MARKER, SUBMIT_MARKER, HarborEnvironment
+from badger_mini.harbor_agent import PACKAGE_DIR, SAVED_MARKER, SUBMIT_MARKER, HarborEnvironment, is_file_view
 
 
 class FakeEnvironment:
@@ -70,8 +70,8 @@ def test_long_output_offloaded(loop):
     out = env.execute({"command": "make"})
     assert out["output"] == text  # full text kept for the submit check and the trajectory
     assert out["returncode"] == 2
-    assert out["output_head"] == "a" * 500
-    assert out["output_tail"] == "z" * 1500
+    assert out["output_head"] == "a" * 300
+    assert out["output_tail"] == "z" * 1000
     assert out["total_chars"] == 6000
     assert out["full_output_path"] == "/tmp/agent_out/cmd_2.log"  # counter counts every command
 
@@ -115,6 +115,56 @@ def test_exec_error_has_no_offload_keys(loop):
     out = make_env(loop, Boom()).execute({"command": "ls"})
     assert out["returncode"] == -1
     assert not OFFLOAD_KEYS & out.keys()
+
+
+def test_file_view_gets_higher_limit(loop):
+    text = "x" * 5000
+    env = make_env(loop, FakeEnvironment([saved(text), saved(text)]))
+    view = env.execute({"command": "cd /app && cat src/main.py"})
+    program = env.execute({"command": "python3 run.py"})
+    assert not OFFLOAD_KEYS & view.keys()  # shown in full: the model asked to read the file
+    assert OFFLOAD_KEYS <= program.keys()
+
+
+def test_huge_file_view_still_offloaded(loop):
+    env = make_env(loop, FakeEnvironment([saved("x" * 12000)]))
+    out = env.execute({"command": "cat big.log"})
+    assert OFFLOAD_KEYS <= out.keys()
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat src/main.py",
+        "cd /app && nl -ba input.tex",
+        "cd /a && cd b && sed -n '1,80p' f.py",
+        "head -50 log",
+        "tail -n 100 x",
+        "cat a.log | grep error",
+        "cat a.red && echo ===== && cat b.red",
+    ],
+)
+def test_is_file_view(command):
+    assert is_file_view(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "grep -rn foo .",
+        "python3 run.py",
+        "make",
+        "catalog list",
+        "sed -i 's/a/b/' f",
+        "cd /app && ls",
+        "cat <<'EOF' > f.py\nprint(1)\nEOF\npython3 f.py",
+        "cat f.py && python3 f.py",
+        "cat f; make",
+        "cat f || true",
+    ],
+)
+def test_is_not_file_view(command):
+    assert not is_file_view(command)
 
 
 # --- observation_template rendering ----------------------------------------------------------------

@@ -3,6 +3,36 @@
 Agreed 2026-10-05 (Mukhriz, with Claude). Branch: `feat/13-output-offloading`. Related: #14 (history
 trimming, Khayyum), which reads the output format defined here.
 
+## v2 changes (2026-10-06)
+
+The v1 30-task run (`jobs/offload-30-v2`, 14/30, 82.2M tokens) saved no tokens against the baseline
+(12/30, 74.0M in `full-mini-v1`; 15/30, 77.2M in Khayyum's run). From its transcripts:
+
+- **55% of the 295 offloaded outputs were the model deliberately viewing a file** (`cat`, `sed -n`,
+  `nl`, `head`); build/test logs were only 7%. Cut off, the model re-read the same file in pieces
+  222 times in 16 tasks (back-to-back `sed -n` range reads: 3.1 per 100 commands before, 8.2 after),
+  roughly 15M tokens of extra calls.
+- The previews (about 2.3K chars each) still made up 37M re-sent characters.
+- The model opened the saved files only 9 times.
+- Confound: the model server was about 19% faster (94 against 79 output tok/s), so time-limit stops fell
+  from 10 to 1 and tasks ran to the 100-turn cap instead (1,457 calls against 1,232).
+
+v2, measured alone (Khayyum's compaction from `main` deliberately not merged yet):
+
+1. **File views get a higher limit.** `is_file_view()` is true when every `&&`/`;`/newline-separated part
+   of the command is `cat`/`nl`/`head`/`tail`/`sed -n` (pipes allowed) or a `cd`/`echo`/`printf`
+   filler, with at least one view and no heredoc (`<<`) or `||`. Such outputs are shown in full up to
+   `AGENT_OUTPUT_VIEW_LIMIT` (default 10,000) and offloaded above that. On the v1 run this would have
+   shown 150 of the 295 offloaded outputs in full.
+2. **Smaller previews:** `AGENT_OUTPUT_HEAD` 500 → 300, `AGENT_OUTPUT_TAIL` 1,500 → 1,000.
+
+Known misses: a file printed by a script (`python3 -c "print(open(f).read())"`) isn't a view;
+`cat f | python3 parse.py` counts as one (its output is then capped at 10,000, not 2,000).
+Measure: one 30-task run against `offload-30-v2`, comparing paging rate, re-sent preview text and
+tokens per call, and noting server speed (no same-day "off" run is possible).
+
+The sections below describe v1; v2 changes only the limit choice in `execute()` and the defaults.
+
 ## Problem
 
 About 97% of `mini_agent`'s tokens are input: the whole history is re-sent to the model every turn, so

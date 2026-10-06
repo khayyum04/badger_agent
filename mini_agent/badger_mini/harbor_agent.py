@@ -14,12 +14,14 @@ Settings (env vars; secrets come from ``op run --env-file=mini_agent/.env.op``, 
   LLM_MAX_TOKENS, LLM_TEMPERATURE, LLM_TOP_P
   AGENT_MAX_TURNS, AGENT_COMMAND_TIMEOUT_SEC
   AGENT_OUTPUT_LIMIT, AGENT_OUTPUT_HEAD, AGENT_OUTPUT_TAIL   output offloading (limit 0 = off)
+  AGENT_OUTPUT_VIEW_LIMIT                offloading limit for file views (cat/nl/head/tail/sed -n)
   BADGER_CONFIG                          agent yaml (default: config/terminal_bench.yaml)
 """
 
 import asyncio
 import contextlib
 import os
+import re
 import shlex
 import threading
 import time
@@ -49,6 +51,19 @@ load_dotenv(PACKAGE_DIR.parent / ".env", override=False)
 SUBMIT_MARKER = "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
 # First line of a command's output when the wrapper saved it to a file in the container; stripped in execute().
 SAVED_MARKER = "BADGER_OUTPUT_SAVED_7f3a"
+# A command that only displays files: cat/nl/head/tail/sed -n (each optionally piped into a filter), possibly
+# chained with `&&`/`;` to `cd` or `echo` separators, and no heredoc. The model asked to read the file, so
+# cutting it makes the model re-read it in small pieces; such outputs get the higher output_view_limit.
+FILE_VIEW_RE = re.compile(r"^(?:cat|nl|head|tail|sed\s+-n)\b")
+_VIEW_FILLER_RE = re.compile(r"^(?:cd|echo|printf)\b")
+
+
+def is_file_view(command: str) -> bool:
+    if "<<" in command or "||" in command:
+        return False
+    parts = [p.strip() for p in re.split(r"&&|;|\n", command) if p.strip()]
+    views = [p for p in parts if FILE_VIEW_RE.match(p)]
+    return bool(views) and all(FILE_VIEW_RE.match(p) or _VIEW_FILLER_RE.match(p) for p in parts)
 
 
 class HarborEnvironmentConfig(BaseModel):
@@ -59,8 +74,10 @@ class HarborEnvironmentConfig(BaseModel):
     env: dict[str, str] = {}
     output_limit: int = 2000
     """Outputs longer than this (chars) are shown as a head/tail preview plus a file path; 0 = off."""
-    output_head: int = 500
-    output_tail: int = 1500
+    output_view_limit: int = 10000
+    """Limit for commands that display a file (FILE_VIEW_RE); those are shown in full up to this size."""
+    output_head: int = 300
+    output_tail: int = 1000
     output_dir: str = "/tmp/agent_out"
     """Where every command's full output is saved, inside the container."""
 
@@ -99,7 +116,10 @@ class HarborEnvironment:
             if saved:
                 text = text[len(SAVED_MARKER) + 1 :]
             output = {"output": text, "returncode": result.return_code, "exception_info": ""}
-            if saved and len(text) > self.config.output_limit:
+            limit = self.config.output_limit
+            if is_file_view(action.get("command", "")):
+                limit = max(limit, self.config.output_view_limit)
+            if saved and len(text) > limit:
                 output |= {
                     "output_head": text[: self.config.output_head],
                     "output_tail": text[-self.config.output_tail :] if self.config.output_tail else "",
@@ -298,6 +318,7 @@ class BadgerMiniAgent(BaseAgent):
             env_config["timeout"] = int(os.environ["AGENT_COMMAND_TIMEOUT_SEC"])
         for env_key, key in (
             ("AGENT_OUTPUT_LIMIT", "output_limit"),
+            ("AGENT_OUTPUT_VIEW_LIMIT", "output_view_limit"),
             ("AGENT_OUTPUT_HEAD", "output_head"),
             ("AGENT_OUTPUT_TAIL", "output_tail"),
         ):
