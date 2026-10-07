@@ -15,6 +15,7 @@ Settings (env vars; secrets come from ``op run --env-file=mini_agent/.env.op``, 
   AGENT_MAX_TURNS, AGENT_COMMAND_TIMEOUT_SEC
   AGENT_STRIP_REASONING                  on = don't re-send the model's earlier thinking (default: off)
   AGENT_COMPACTION                       on = self-compaction, see compaction.py (default: off)
+  AGENT_THINKING_CAP                     max_tokens per reply; a reply after an overrun gets LLM_MAX_TOKENS (default: off)
   BADGER_CONFIG                          agent yaml (default: config/terminal_bench.yaml)
 """
 
@@ -145,6 +146,12 @@ class BadgerLitellmModel(LitellmModel):
     abort_exceptions = [*LitellmModel.abort_exceptions, litellm.exceptions.BadRequestError]
     strip_reasoning = False
     compactor: Compactor | None = None
+    # Thinking cap: most replies get `thinking_cap` tokens (thinking included). A reply that hit its limit
+    # (finish_reason=length, usually a FormatError with no tool call) makes the next call use the full
+    # max_tokens, until a reply finishes normally. Long thinking turns are what run tasks out of time.
+    thinking_cap: int = 0
+    _boost_next = False
+    n_boosted_calls = 0
 
     def _prepare_messages_for_api(self, messages: list[dict]) -> list[dict]:
         if self.strip_reasoning:
@@ -157,15 +164,24 @@ class BadgerLitellmModel(LitellmModel):
         return super()._prepare_messages_for_api(messages)
 
     def _query(self, messages: list[dict[str, str]], **kwargs):
+        boosted = self._boost_next
+        if self.thinking_cap and not boosted:
+            kwargs = {**kwargs, "max_tokens": min(self.thinking_cap, self.config.model_kwargs.get("max_tokens") or self.thinking_cap)}
+        if boosted:
+            self.n_boosted_calls += 1
         if not self.compactor:
-            return super()._query(messages, **kwargs)
-        # The parent hardcodes tools=[BASH_TOOL], so its call is repeated here with the compactor's tools.
-        return litellm.completion(
-            model=self.config.model_name,
-            messages=messages,
-            tools=self.compactor.tools(),
-            **(self.config.model_kwargs | kwargs | self.compactor.request_kwargs()),
-        )
+            response = super()._query(messages, **kwargs)
+        else:
+            # The parent hardcodes tools=[BASH_TOOL], so its call is repeated here with the compactor's tools.
+            response = litellm.completion(
+                model=self.config.model_name,
+                messages=messages,
+                tools=self.compactor.tools(),
+                **(self.config.model_kwargs | kwargs | self.compactor.request_kwargs()),
+            )
+        if self.thinking_cap:
+            self._boost_next = response.choices[0].finish_reason == "length"
+        return response
 
     def _parse_actions(self, response) -> list[dict]:
         if self.compactor:
@@ -250,6 +266,8 @@ class HarborSyncedAgent(DefaultAgent):
             "exit_status": (self.messages[-1].get("extra") or {}).get("exit_status", "") if self.messages else "",
             "trajectory_path": str(self.config.output_path),
             "strip_reasoning": getattr(self.model, "strip_reasoning", False),
+            "thinking_cap": getattr(self.model, "thinking_cap", 0),
+            "n_boosted_calls": getattr(self.model, "n_boosted_calls", 0),
         }
         if self.compactor:
             ctx.metadata["compactions"] = self.compactor.log
@@ -333,6 +351,7 @@ class BadgerMiniAgent(BaseAgent):
         model = get_model(config=_model_config(config.get("model") or {}, self.model_name))
         model.strip_reasoning = strip_reasoning
         model.compactor = compactor
+        model.thinking_cap = int(os.environ.get("AGENT_THINKING_CAP") or 0)
         env = HarborEnvironment(environment, asyncio.get_running_loop(), stop, **env_config)
         agent = HarborSyncedAgent(
             model,
