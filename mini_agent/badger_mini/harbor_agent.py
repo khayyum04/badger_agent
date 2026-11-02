@@ -15,6 +15,8 @@ Settings (env vars; secrets come from ``op run --env-file=mini_agent/.env.op``, 
   AGENT_MAX_TURNS, AGENT_COMMAND_TIMEOUT_SEC
   AGENT_STRIP_REASONING                  on = don't re-send the model's earlier thinking (default: off)
   AGENT_COMPACTION                       on = self-compaction, see compaction.py (default: off)
+  AGENT_THINKING_CAP                     max_tokens per reply; a reply after an overrun gets LLM_MAX_TOKENS (default: off)
+  AGENT_TIME_AWARENESS                   on = show time used in each command result, nudge at 10 min (default: off)
   BADGER_CONFIG                          agent yaml (default: config/terminal_bench.yaml)
 """
 
@@ -50,6 +52,15 @@ PACKAGE_DIR = Path(__file__).resolve().parent
 load_dotenv(PACKAGE_DIR.parent / ".env", override=False)
 
 SUBMIT_MARKER = "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
+
+# Time awareness (AGENT_TIME_AWARENESS): the agent can't see the task's time limit, so each command
+# result shows the time used, and one nudge asks for a working answer at NUDGE_AFTER_SEC.
+CLOCK_TEMPLATE = "\n[time used: {minutes} min; the limit is unknown and may be as short as 15 min]"
+NUDGE_AFTER_SEC = 600
+NUDGE_MESSAGE = (
+    "\n10 minutes used. If the required output isn't written yet, write your best version now, "
+    "then keep improving it."
+)
 
 
 class HarborEnvironmentConfig(BaseModel):
@@ -145,6 +156,12 @@ class BadgerLitellmModel(LitellmModel):
     abort_exceptions = [*LitellmModel.abort_exceptions, litellm.exceptions.BadRequestError]
     strip_reasoning = False
     compactor: Compactor | None = None
+    # Thinking cap: most replies get `thinking_cap` tokens (thinking included). A reply that hit its limit
+    # (finish_reason=length, usually a FormatError with no tool call) makes the next call use the full
+    # max_tokens, until a reply finishes normally. Long thinking turns are what run tasks out of time.
+    thinking_cap: int = 0
+    _boost_next = False
+    n_boosted_calls = 0
 
     def _prepare_messages_for_api(self, messages: list[dict]) -> list[dict]:
         if self.strip_reasoning:
@@ -157,15 +174,24 @@ class BadgerLitellmModel(LitellmModel):
         return super()._prepare_messages_for_api(messages)
 
     def _query(self, messages: list[dict[str, str]], **kwargs):
+        boosted = self._boost_next
+        if self.thinking_cap and not boosted:
+            kwargs = {**kwargs, "max_tokens": min(self.thinking_cap, self.config.model_kwargs.get("max_tokens") or self.thinking_cap)}
+        if boosted:
+            self.n_boosted_calls += 1
         if not self.compactor:
-            return super()._query(messages, **kwargs)
-        # The parent hardcodes tools=[BASH_TOOL], so its call is repeated here with the compactor's tools.
-        return litellm.completion(
-            model=self.config.model_name,
-            messages=messages,
-            tools=self.compactor.tools(),
-            **(self.config.model_kwargs | kwargs | self.compactor.request_kwargs()),
-        )
+            response = super()._query(messages, **kwargs)
+        else:
+            # The parent hardcodes tools=[BASH_TOOL], so its call is repeated here with the compactor's tools.
+            response = litellm.completion(
+                model=self.config.model_name,
+                messages=messages,
+                tools=self.compactor.tools(),
+                **(self.config.model_kwargs | kwargs | self.compactor.request_kwargs()),
+            )
+        if self.thinking_cap:
+            self._boost_next = response.choices[0].finish_reason == "length"
+        return response
 
     def _parse_actions(self, response) -> list[dict]:
         if self.compactor:
@@ -212,6 +238,9 @@ class HarborSyncedAgent(DefaultAgent):
         self.n_input_tokens = 0
         self.n_output_tokens = 0
         self.n_cache_tokens = 0
+        self.time_awareness = False
+        self.nudged_at_sec: int | None = None
+        self.extra_template_vars["time_awareness"] = False  # the prompt templates render with StrictUndefined
 
     def query(self) -> dict:
         if self._stop.is_set():
@@ -226,7 +255,22 @@ class HarborSyncedAgent(DefaultAgent):
             self.messages = self.compactor.apply(self.messages, actions[0])
             self._sync_context()
             return []
-        return super().execute_actions(message)
+        if not self.time_awareness:
+            return super().execute_actions(message)
+        # Same as DefaultAgent.execute_actions(), with the clock added before the results are stored.
+        outputs = [self.env.execute(action) for action in message.get("extra", {}).get("actions", [])]
+        observations = self.model.format_observation_messages(message, outputs, self.get_template_vars())
+        if observations and isinstance(observations[-1].get("content"), str):
+            observations[-1]["content"] += self._clock_text()
+        return self.add_messages(*observations)
+
+    def _clock_text(self) -> str:
+        elapsed = int(time.time() - self._start_time)
+        text = CLOCK_TEMPLATE.format(minutes=elapsed // 60)
+        if self.nudged_at_sec is None and elapsed >= NUDGE_AFTER_SEC:
+            self.nudged_at_sec = elapsed
+            text += NUDGE_MESSAGE
+        return text
 
     def add_messages(self, *messages: dict) -> list[dict]:
         for message in messages:
@@ -250,6 +294,10 @@ class HarborSyncedAgent(DefaultAgent):
             "exit_status": (self.messages[-1].get("extra") or {}).get("exit_status", "") if self.messages else "",
             "trajectory_path": str(self.config.output_path),
             "strip_reasoning": getattr(self.model, "strip_reasoning", False),
+            "thinking_cap": getattr(self.model, "thinking_cap", 0),
+            "n_boosted_calls": getattr(self.model, "n_boosted_calls", 0),
+            "time_awareness": self.time_awareness,
+            "nudged_at_sec": self.nudged_at_sec,
         }
         if self.compactor:
             ctx.metadata["compactions"] = self.compactor.log
@@ -333,6 +381,7 @@ class BadgerMiniAgent(BaseAgent):
         model = get_model(config=_model_config(config.get("model") or {}, self.model_name))
         model.strip_reasoning = strip_reasoning
         model.compactor = compactor
+        model.thinking_cap = int(os.environ.get("AGENT_THINKING_CAP") or 0)
         env = HarborEnvironment(environment, asyncio.get_running_loop(), stop, **env_config)
         agent = HarborSyncedAgent(
             model,
@@ -343,6 +392,8 @@ class BadgerMiniAgent(BaseAgent):
             output_path=self.logs_dir / "mini-swe-agent.trajectory.json",
             **agent_config,
         )
+        agent.time_awareness = os.environ.get("AGENT_TIME_AWARENESS", "off").lower() == "on"
+        agent.extra_template_vars["time_awareness"] = agent.time_awareness
         try:
             result = await _run_in_daemon_thread(agent.run, instruction)
         except asyncio.CancelledError:
