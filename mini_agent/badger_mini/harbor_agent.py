@@ -16,6 +16,7 @@ Settings (env vars; secrets come from ``op run --env-file=mini_agent/.env.op``, 
   AGENT_STRIP_REASONING                  on = don't re-send the model's earlier thinking (default: off)
   AGENT_COMPACTION                       on = self-compaction, see compaction.py (default: off)
   AGENT_THINKING_CAP                     max_tokens per reply; a reply after an overrun gets LLM_MAX_TOKENS (default: off)
+  AGENT_TIME_AWARENESS                   on = show time used in each command result, nudge at 10 min (default: off)
   BADGER_CONFIG                          agent yaml (default: config/terminal_bench.yaml)
 """
 
@@ -51,6 +52,15 @@ PACKAGE_DIR = Path(__file__).resolve().parent
 load_dotenv(PACKAGE_DIR.parent / ".env", override=False)
 
 SUBMIT_MARKER = "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
+
+# Time awareness (AGENT_TIME_AWARENESS): the agent can't see the task's time limit, so each command
+# result shows the time used, and one nudge asks for a working answer at NUDGE_AFTER_SEC.
+CLOCK_TEMPLATE = "\n[time used: {minutes} min; the limit is unknown and may be as short as 15 min]"
+NUDGE_AFTER_SEC = 600
+NUDGE_MESSAGE = (
+    "\n10 minutes used. If the required output isn't written yet, write your best version now, "
+    "then keep improving it."
+)
 
 
 class HarborEnvironmentConfig(BaseModel):
@@ -228,6 +238,9 @@ class HarborSyncedAgent(DefaultAgent):
         self.n_input_tokens = 0
         self.n_output_tokens = 0
         self.n_cache_tokens = 0
+        self.time_awareness = False
+        self.nudged_at_sec: int | None = None
+        self.extra_template_vars["time_awareness"] = False  # the prompt templates render with StrictUndefined
 
     def query(self) -> dict:
         if self._stop.is_set():
@@ -242,7 +255,22 @@ class HarborSyncedAgent(DefaultAgent):
             self.messages = self.compactor.apply(self.messages, actions[0])
             self._sync_context()
             return []
-        return super().execute_actions(message)
+        if not self.time_awareness:
+            return super().execute_actions(message)
+        # Same as DefaultAgent.execute_actions(), with the clock added before the results are stored.
+        outputs = [self.env.execute(action) for action in message.get("extra", {}).get("actions", [])]
+        observations = self.model.format_observation_messages(message, outputs, self.get_template_vars())
+        if observations and isinstance(observations[-1].get("content"), str):
+            observations[-1]["content"] += self._clock_text()
+        return self.add_messages(*observations)
+
+    def _clock_text(self) -> str:
+        elapsed = int(time.time() - self._start_time)
+        text = CLOCK_TEMPLATE.format(minutes=elapsed // 60)
+        if self.nudged_at_sec is None and elapsed >= NUDGE_AFTER_SEC:
+            self.nudged_at_sec = elapsed
+            text += NUDGE_MESSAGE
+        return text
 
     def add_messages(self, *messages: dict) -> list[dict]:
         for message in messages:
@@ -268,6 +296,8 @@ class HarborSyncedAgent(DefaultAgent):
             "strip_reasoning": getattr(self.model, "strip_reasoning", False),
             "thinking_cap": getattr(self.model, "thinking_cap", 0),
             "n_boosted_calls": getattr(self.model, "n_boosted_calls", 0),
+            "time_awareness": self.time_awareness,
+            "nudged_at_sec": self.nudged_at_sec,
         }
         if self.compactor:
             ctx.metadata["compactions"] = self.compactor.log
@@ -362,6 +392,8 @@ class BadgerMiniAgent(BaseAgent):
             output_path=self.logs_dir / "mini-swe-agent.trajectory.json",
             **agent_config,
         )
+        agent.time_awareness = os.environ.get("AGENT_TIME_AWARENESS", "off").lower() == "on"
+        agent.extra_template_vars["time_awareness"] = agent.time_awareness
         try:
             result = await _run_in_daemon_thread(agent.run, instruction)
         except asyncio.CancelledError:
