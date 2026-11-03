@@ -44,13 +44,19 @@ def job_dir(tmp_path):
     return job
 
 
-def test_summary_matches_score_sh_math(job_dir):
+def test_summary_scores(job_dir):
     job = ex.summarize_job(job_dir)
     assert job["job"] == "my-job"
     assert job["n_tasks"] == 3 and job["n_passed"] == 1
     assert job["tb_score"] == pytest.approx(1 / 3)  # a missing reward counts as 0, like score.sh
-    assert job["total_tokens"] == 1650
-    assert job["leaderboard_score"] == pytest.approx(1 / 3 - 0.01 * 1650 / 1e6)
+    assert job["total_tokens"] == 1650 and job["tokens_per_task"] == 550
+    assert job["leaderboard_score"] == pytest.approx(1 / 3 - 0.01 * 550 / 1e8)
+
+
+def test_token_penalty_rule():
+    assert ex.token_penalty(143_204_830 / 89) == pytest.approx(0.000161, abs=1e-6)  # full-mini-v1
+    assert ex.token_penalty(100_000_000) == 0.01
+    assert ex.token_penalty(500_000_000) == 0.01  # capped
 
 
 def test_trial_outcomes_and_counts(job_dir):

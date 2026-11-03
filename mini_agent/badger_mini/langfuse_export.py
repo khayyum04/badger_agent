@@ -13,7 +13,8 @@ In Langfuse:
             already exported is skipped (delete the run in the UI to export it again)
   per task  a trace (session = job name) with one generation carrying the task's total tokens,
             and the scores reward (0/1), total_tokens, outcome (Submitted / AgentTimeoutError / ...)
-  per run   the scores tb_score, total_tokens, leaderboard_score - the same math as scripts/score.sh
+  per run   the scores tb_score, total_tokens, tokens_per_task, leaderboard_score (current competition
+            rule, see token_penalty())
 
 Needs LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY and LANGFUSE_HOST (e.g. https://cloud.langfuse.com) and
 `uv pip install -e "mini_agent/[tracing]"`. The run_*.sh scripts call this after a run when LANGFUSE_ENABLED=1.
@@ -26,7 +27,12 @@ import sys
 from pathlib import Path
 
 DATASET = "terminal-bench-2.0"
-TOKEN_PENALTY_PER_M = 0.01  # leaderboard_score = tb_score - 0.01 * total_tokens / 1M
+
+
+def token_penalty(tokens_per_task: float) -> float:
+    """Competition rule: min(0.01, 0.01 * tokens_per_task / 100M), tokens_per_task = total_tokens / 89.
+    For a subset job, tokens_per_task is the job's own average, which equals the rule on a full run."""
+    return min(0.01, 0.01 * tokens_per_task / 100_000_000)
 
 
 def _load_json(path: Path) -> dict | None:
@@ -131,14 +137,16 @@ def summarize_job(job_dir: Path) -> dict:
         "n_passed": sum(t["passed"] for t in trials),
         "tb_score": tb_score,
         "total_tokens": total_tokens,
-        "leaderboard_score": tb_score - TOKEN_PENALTY_PER_M * total_tokens / 1_000_000,
+        "tokens_per_task": total_tokens / n if n else 0.0,
+        "leaderboard_score": tb_score - token_penalty(total_tokens / n if n else 0.0),
     }
 
 
 def print_job(job: dict) -> None:
     print(
         f"\n{job['job']}  tasks={job['n_tasks']} passed={job['n_passed']} tb_score={job['tb_score']:.4f} "
-        f"total_tokens={job['total_tokens']} leaderboard_score={job['leaderboard_score']:.4f}"
+        f"total_tokens={job['total_tokens']} tokens_per_task={job['tokens_per_task']:.0f} "
+        f"leaderboard_score={job['leaderboard_score']:.5f}"
     )
     for t in job["trials"]:
         print(
@@ -219,10 +227,11 @@ def export_job(langfuse, job: dict, force: bool = False) -> str | None:
             Evaluation(name="outcome", value=output["outcome"], data_type="CATEGORICAL"),
         ]
 
-    def run_scores(**kwargs):  # from the whole job, so it matches score.sh exactly
+    def run_scores(**kwargs):  # from the whole job, not just the items in this call
         return [
             Evaluation(name="tb_score", value=job["tb_score"]),
             Evaluation(name="total_tokens", value=job["total_tokens"]),
+            Evaluation(name="tokens_per_task", value=job["tokens_per_task"]),
             Evaluation(name="leaderboard_score", value=job["leaderboard_score"]),
         ]
 
