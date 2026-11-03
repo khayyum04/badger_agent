@@ -17,6 +17,8 @@ Settings (env vars; secrets come from ``op run --env-file=mini_agent/.env.op``, 
   AGENT_COMPACTION                       on = self-compaction, see compaction.py (default: off)
   AGENT_THINKING_CAP                     max_tokens per reply; a reply after an overrun gets LLM_MAX_TOKENS (default: off)
   AGENT_TIME_AWARENESS                   on = show time used in each command result, nudge at 10 min (default: off)
+  AGENT_SUBMIT_CHECK                     on = the first submit is held back and answered with SUBMIT_CHECK_MESSAGE (default: off)
+  AGENT_NO_BENCHMARK_LOOKUP              on = prompt line: don't look up this benchmark or its solutions (default: off)
   BADGER_CONFIG                          agent yaml (default: config/terminal_bench.yaml)
 """
 
@@ -62,6 +64,19 @@ NUDGE_MESSAGE = (
     "then keep improving it."
 )
 
+# Submit check (AGENT_SUBMIT_CHECK): the agent verifies against its own reading of the task, and the hidden
+# tests fail it on requirements it skipped (leftover build files in the output directory, changes the task
+# didn't ask for). A prompt rule read at the start didn't stop that, so the reminder comes at the moment of
+# the decision: the first submit is answered with this checklist; the next submit goes through.
+SUBMIT_CHECK_MESSAGE = """Not submitted yet: one final check first (this happens only once).
+1. Re-read the task. Check every explicit requirement: exact paths and file names, output format,
+   function signatures, and any stated limits (speed, size, what must stay unchanged).
+2. List the directories the task names (ls -la). Delete files you created there only to build or test
+   (scratch scripts, compiled test binaries, logs) unless the task asks for them. Keep what the task needs.
+3. Make sure you changed only what the task asked for: don't rewrite history, delete data, or change
+   settings the task didn't mention.
+Fix anything that fails. Then submit again with: echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"""
+
 
 class HarborEnvironmentConfig(BaseModel):
     timeout: int = 180
@@ -79,6 +94,9 @@ class HarborEnvironment:
         self._environment = environment
         self._loop = loop
         self._stop = stop
+        self.submit_check = False
+        self.submit_checked_at: float | None = None
+        """time.time() of the held-back first submit; None until then."""
 
     def execute(self, action: dict, cwd: str = "", *, timeout: int | None = None) -> dict[str, Any]:
         if self._stop.is_set():
@@ -127,6 +145,10 @@ class HarborEnvironment:
     def _check_finished(self, output: dict):
         lines = output.get("output", "").lstrip().splitlines(keepends=True)
         if lines and lines[0].strip() == SUBMIT_MARKER and output["returncode"] == 0:
+            if self.submit_check and self.submit_checked_at is None:
+                self.submit_checked_at = time.time()
+                output["output"] = SUBMIT_CHECK_MESSAGE
+                return
             submission = "".join(lines[1:])
             raise Submitted(
                 {"role": "exit", "content": submission, "extra": {"exit_status": "Submitted", "submission": submission}}
@@ -241,6 +263,7 @@ class HarborSyncedAgent(DefaultAgent):
         self.time_awareness = False
         self.nudged_at_sec: int | None = None
         self.extra_template_vars["time_awareness"] = False  # the prompt templates render with StrictUndefined
+        self.extra_template_vars["no_benchmark_lookup"] = False
 
     def query(self) -> dict:
         if self._stop.is_set():
@@ -298,6 +321,13 @@ class HarborSyncedAgent(DefaultAgent):
             "n_boosted_calls": getattr(self.model, "n_boosted_calls", 0),
             "time_awareness": self.time_awareness,
             "nudged_at_sec": self.nudged_at_sec,
+            "submit_check": getattr(self.env, "submit_check", False),
+            "submit_checked_at_sec": (
+                int(self.env.submit_checked_at - self._start_time)
+                if getattr(self.env, "submit_checked_at", None) is not None
+                else None
+            ),
+            "no_benchmark_lookup": self.extra_template_vars.get("no_benchmark_lookup", False),
         }
         if self.compactor:
             ctx.metadata["compactions"] = self.compactor.log
@@ -383,6 +413,7 @@ class BadgerMiniAgent(BaseAgent):
         model.compactor = compactor
         model.thinking_cap = int(os.environ.get("AGENT_THINKING_CAP") or 0)
         env = HarborEnvironment(environment, asyncio.get_running_loop(), stop, **env_config)
+        env.submit_check = os.environ.get("AGENT_SUBMIT_CHECK", "off").lower() == "on"
         agent = HarborSyncedAgent(
             model,
             env,
@@ -394,6 +425,7 @@ class BadgerMiniAgent(BaseAgent):
         )
         agent.time_awareness = os.environ.get("AGENT_TIME_AWARENESS", "off").lower() == "on"
         agent.extra_template_vars["time_awareness"] = agent.time_awareness
+        agent.extra_template_vars["no_benchmark_lookup"] = os.environ.get("AGENT_NO_BENCHMARK_LOOKUP", "off").lower() == "on"
         try:
             result = await _run_in_daemon_thread(agent.run, instruction)
         except asyncio.CancelledError:

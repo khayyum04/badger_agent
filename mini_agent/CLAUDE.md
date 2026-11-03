@@ -6,10 +6,11 @@ The team's main agent: mini-swe-agent (pinned PyPI `2.4.6`) wired into Harbor as
 ## Contents
 - `badger_mini/harbor_agent.py` — `BadgerMiniAgent` (Harbor `BaseAgent`), `HarborEnvironment` (mini-swe-agent environment over `environment.exec()`), `HarborSyncedAgent` (`DefaultAgent` that mirrors token usage into Harbor's `AgentContext`), `BadgerLitellmModel` (no retries on 400s).
 - `badger_mini/compaction.py` — `Compactor`: self-compaction (`AGENT_COMPACTION=on`, default off). Owns the `self_compact` tool, the stage messages, parsing of `self_compact` calls and the history rebuild; all its model-facing text lives there, not in the YAML. One instance per task, shared by `HarborSyncedAgent` (stage check before each query, rebuild on a `self_compact` action) and `BadgerLitellmModel` (tool list, parsing). Experiment version: `../docs/plans/self-compaction-mvp.md`.
-- `tests/test_compaction.py`, `tests/test_thinking_cap.py`, `tests/test_time_awareness.py` — offline tests with a scripted model / patched litellm (`uv pip install -e "mini_agent/[dev]"`, `pytest mini_agent/tests`).
+- `tests/test_compaction.py`, `tests/test_thinking_cap.py`, `tests/test_time_awareness.py`, `tests/test_submit_check.py` — offline tests with a scripted model / patched litellm (`uv pip install -e "mini_agent/[dev]"`, `pytest mini_agent/tests`).
 - `badger_mini/config/terminal_bench.yaml` — prompts, `step_limit`, command `timeout`, observation and format-error templates. Selected by `BADGER_CONFIG` (default this file).
 - `scripts/` — `run_sample.sh`, `run_subset.sh <list>`, `run_full.sh`, `check_endpoint.sh`, `score.sh <job-dir>`; all `cd` into `mini_agent/` and write to `mini_agent/jobs/`.
 - `eval/experiment_subset.txt` — the 30 tasks behind `../docs/research/mini-30-vs-baseline.md`.
+- `eval/submit_check_subset.txt` — 4 tasks that failed a skipped requirement in every run + 7 controls (`../docs/plans/submit-check.md`).
 - `eval/slow_subset.txt` — the 28 tasks that timed out or quit on overruns in `full-mini-v1`, plus 6 thinking-heavy passes as a regression check (`../docs/plans/thinking-cap.md`).
 - `.env.example`, `.env.op.example` — committed templates; real `.env` / `.env.op` are gitignored.
 
@@ -26,4 +27,6 @@ The team's main agent: mini-swe-agent (pinned PyPI `2.4.6`) wired into Harbor as
 - `AGENT_STRIP_REASONING=on` drops earlier thinking from what is *sent* (`_prepare_messages_for_api`); stored messages keep it.
 - `AGENT_THINKING_CAP` (default off) sets `max_tokens` per reply in `BadgerLitellmModel._query`; after a reply with `finish_reason=length` the next call gets the full `LLM_MAX_TOKENS` until one finishes normally. `n_boosted_calls` goes into the result metadata.
 - `AGENT_TIME_AWARENESS=on` (default off) appends the time used to each command result in `HarborSyncedAgent.execute_actions()` (plus one nudge at 10 min, `nudged_at_sec` in metadata) and switches prompt rule 4 via the `time_awareness` template variable. Plan: `../docs/plans/time-awareness.md`.
+- `AGENT_SUBMIT_CHECK=on` (default off): `HarborEnvironment._check_finished()` holds back the first successful `COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` and returns `SUBMIT_CHECK_MESSAGE` (re-read requirements, delete build/test leftovers in the task's directories, no unrequested changes) as that command's output; the next submit goes through. Costs one turn. `submit_checked_at_sec` in metadata. Plan: `../docs/plans/submit-check.md`.
+- `AGENT_NO_BENCHMARK_LOOKUP=on` (default off) adds one system-prompt line (template variable `no_benchmark_lookup`): don't search online for the benchmark or published solutions. Added after the agent fetched Terminal-Bench's repo in two full runs (`extract-elf` in full-mini-v1 copied the solution).
 - No task-specific logic anywhere (competition rule): one config, one loop.
