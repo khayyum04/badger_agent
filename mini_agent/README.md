@@ -15,6 +15,7 @@ tasks it passed 15 against the starter agent's 10, with no ungraded crashes. The
 |---|---|
 | `badger_mini/harbor_agent.py` | `BadgerMiniAgent`, the Harbor agent: runs mini-swe-agent's `DefaultAgent` in a worker thread, with a `HarborEnvironment` that sends each command through `environment.exec()` |
 | `badger_mini/compaction.py` | Self-compaction (off by default, `AGENT_COMPACTION=on`): the `self_compact` tool, the notice / warning / hard stages, and the history rebuild. Experiment, see [`../docs/plans/self-compaction-mvp.md`](../docs/plans/self-compaction-mvp.md) |
+| `badger_mini/langfuse_export.py` | Uploads job summaries to Langfuse after a run (opt-in, see below). Reads only Harbor's output; the agent never imports it |
 | `badger_mini/config/terminal_bench.yaml` | Prompts, step limit, command timeout, observation and format-error templates |
 | `tests/` | Offline tests (`uv pip install -e "mini_agent/[dev]"`, then `pytest mini_agent/tests`) |
 | `.env.op.example` / `.env.example` | 1Password references for the endpoint / non-secret tuning. Copy to `.env.op` / `.env` (gitignored) |
@@ -69,6 +70,29 @@ cd mini_agent && op run --env-file=.env.op -- harbor run -d terminal-bench@2.0 \
 Results land in `mini_agent/jobs/<job>/<task>__<id>/`: `result.json` (reward, tokens) and
 `agent/mini-swe-agent.trajectory.json` (full transcript, including every model response's
 `finish_reason` and token usage).
+
+## Langfuse dashboard (optional)
+
+Uploads one summary per task (reward, tokens, outcome, turns, failed commands) to a Langfuse
+**dataset experiment run** named after the job, so runs can be compared task by task in the
+Langfuse UI. Summary only, about 9 Langfuse units per task (~800 per full run; the free tier has 50k
+a month). It reads the job directory after the run, so the agent and the submission are unaffected.
+
+```bash
+uv pip install -e "mini_agent/[tracing]"            # once
+# add LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_HOST to mini_agent/.env.op (see .env.op.example)
+python -m badger_mini.langfuse_export --dry-run mini_agent/jobs/<job>         # print what would be uploaded
+op run --env-file=mini_agent/.env.op -- python -m badger_mini.langfuse_export mini_agent/jobs/<job> ...
+LANGFUSE_ENABLED=1 op run --env-file=mini_agent/.env.op -- ./mini_agent/scripts/run_subset.sh <list>  # export after the run
+```
+
+In Langfuse: **Datasets → terminal-bench-2.0 → Runs** lists one run per job with `tb_score`,
+`total_tokens` and `leaderboard_score`; open a run for its tasks with `reward`, `total_tokens` and
+`outcome`, or select several runs to compare them. **Sessions** groups each job's tasks. A job is
+exported once (its run ID comes from the job name); delete the run in the UI to export it again.
+Traces carry the upload time; the run's own times are in each task's metadata (`started_at`,
+`agent_seconds`). With compaction on, the command counts cover only the history left after the last
+compaction.
 
 ## Gotchas
 

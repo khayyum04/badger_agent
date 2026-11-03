@@ -3,4 +3,4 @@
 #   op run --env-file=mini_agent/.env.op -- ./mini_agent/scripts/run_full.sh --job-name full-mini-v1
 # The endpoint is shared: keep N_CONCURRENT at 2-4 and announce full sweeps in Kaggle Discussion.
 source "$(dirname "$0")/_common.sh"
-harbor run -d terminal-bench@2.0 --agent "$AGENT" -n "${N_CONCURRENT:-3}" --jobs-dir jobs "$@"
+run_harbor -d terminal-bench@2.0 --agent "$AGENT" -n "${N_CONCURRENT:-3}" --jobs-dir jobs "$@"
