@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-This is our team's repo for the **Efficient Coder** competition (ML+X, UW–Madison, Kaggle): build an autonomous coding agent on top of an *approved open-weight model* (7–37 GB class) and score it on Terminal-Bench 2.0 (89 tasks) via [Harbor](https://www.harborframework.com/). The repo root holds the competition spec (`README.md`, `RULES.md`, `FAQ.md`, `RESOURCES.md`, `WRITEUP_TEMPLATE.md`).
+This is our team's repo for the **Efficient Coder** competition (ML+X, UW–Madison, Kaggle): build an autonomous coding agent on *open weights within a 96 GB budget* and score it on Terminal-Bench 2.0 (89 tasks) via [Harbor](https://www.harborframework.com/). The repo root holds the competition spec (`README.md`, `RULES.md`, `FAQ.md`, `RESOURCES.md`, `WRITEUP_TEMPLATE.md`).
 
 **The main agent is `mini_agent/`**: [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) (pinned PyPI `2.4.6`) run as a Harbor external agent. All new agent work happens there; read `mini_agent/CLAUDE.md` first. `starter/` holds the original starter ReAct agent, kept as a reference implementation, plus the task lists (`starter/eval/`). `docs/` holds the guides shared by both agents (setup, 1Password, endpoint, Harbor, safety, troubleshooting) and `docs/research/` (run analyses). Why we switched: `docs/research/mini-30-vs-baseline.md`.
 
@@ -92,12 +92,12 @@ Key contracts and invariants, since they're easy to break silently:
 ## Competition constraints that affect how you can change the agent
 
 - **No task-specific hardcoding.** One system prompt, one agent loop, no `if task_name == "fix-git"` branches. Detecting a task *category* from the instruction text and adjusting strategy generically is fine; hardcoding a solution or prompt for an individual task is grounds for disqualification (all 89 tasks are public and the top 5 submissions get code-reviewed).
-- **Approved models only for the submitted run** (dev/prototyping is unrestricted). No closed-weight model anywhere in the system, including "just as a planner" — see the approved list and quantization-equivalence rules in the root `README.md`.
+- **Open weights within the 96 GB budget for the submitted run** (Kaggle Evaluation page): any checkpoint, any vendor, 4-bit or higher. Dev/prototyping is unrestricted. Our model, `qwen3.8-27b` on the UW–Madison gateway (Qwen3.8-27B FP8), is allowed for the submitted run. No closed-weight model anywhere in the system, including "just as a planner".
 - Any endpoint change is a `.env` / `.env.op` edit (`LLM_BASE_URL`/`LLM_MODEL`/`LLM_API_KEY`), never a code change — that portability is intentional and should be preserved when extending `mini_agent/badger_mini/harbor_agent.py` (or the starter's `llm.py`).
 - Real keys never go in a committed file. The hosted key is loaded via 1Password (`mini_agent/.env.op` / `starter/.env.op`, gitignored; the `.env.op.example` files are the committed templates). If someone uses a plaintext key in the gitignored `starter/.env` instead, treat any key an agent might have `cat`'d as burned (see `docs/safety.md`).
 
 ## Where the improvement levers are
 
-For the main agent, the open problems measured on the 30-task subset are listed at the end of `docs/research/mini-30-vs-baseline.md`: token cost (the full history is re-sent every turn), retries after a reasoning overrun, and output quality before submitting. Measure every change on a fixed task list against the current `mini_agent` result, one change at a time.
+For the main agent, the open problems measured on the 30-task subset are listed at the end of `docs/research/mini-30-vs-baseline.md`. With the capped token penalty, passes come first: the biggest failure group is tasks that hit their time limit (`docs/research/slow-subset-timeouts.md` on branch `feat/time-awareness`), then retries after a reasoning overrun and output quality before submitting. Token cost only breaks ties. Measure every change on a fixed task list against the current `mini_agent` result, one change at a time.
 
 The general levers from `starter/README.md`, roughly in order of effort: `prompts.py` (instructions, task-type hints, output discipline) → context management (the conversation grows every turn — what to keep/summarize/drop) → error recovery (the baseline just shows the error and hopes) → planning/self-critique (separate plan/act steps, verify before declaring done) → model choice/quantization → architecture (multi-stage pipelines, retrieval, or switching to an *installed* agent per `docs/harbor.md` for custom in-container tooling).
