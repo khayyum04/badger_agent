@@ -72,8 +72,8 @@ Results land in `mini_agent/jobs/<job>/<task>__<id>/`: `result.json` (reward, to
 
 ## Gotchas
 
-- **Model:** the UW gateway serves only `qwen3.8-27b`, which is **not approved** for the submitted
-  run. Swap `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` in `.env.op` once an approved endpoint is
+- **Model:** the UW gateway serves only `qwen3.8-27b` (Qwen3.8-27B FP8), which is **allowed** for the submitted
+  run (open weights within the 96 GB budget). To try another model, swap `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` in `.env.op` once an endpoint is
   available. `check_endpoint.sh` lists the served model ids.
 - **Credentials:** `.env.op` holds only `op://` references. `.env` is loaded with `override=False`,
   so `op run` values always win; still keep connection values out of `.env`.
