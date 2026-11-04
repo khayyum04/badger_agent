@@ -128,3 +128,23 @@ def test_think_tags_in_content_are_used_when_no_reasoning_field(calls):
     r.choices[0].message.content = "<think>Try XOR first."
     script += [r]
     assert "<notes>\nTry XOR first.\n</notes>" in query(make_model(recovery=True)).messages[0]["content"]
+
+
+def test_rejected_switch_falls_back_to_a_normal_call(monkeypatch):
+    """A gateway that 400s on chat_template_kwargs must not fail the task: retry without it, stop sending it."""
+    sent = []
+    script = [response("length", "a"), response("length", "b"), response("tool_calls", tool_call=True),
+              response("length", "c"), response("length", "d"), response("tool_calls", tool_call=True)]
+
+    def completion(**kwargs):
+        sent.append(thinking_off(kwargs))
+        if thinking_off(kwargs):
+            raise litellm.exceptions.BadRequestError("unknown field chat_template_kwargs", "openai", "test")
+        return script.pop(0)
+
+    monkeypatch.setattr(litellm, "completion", completion)
+    model = make_model(recovery=True)
+    results = [query(model) for _ in range(6)]
+    assert sent == [False, False, True, False, False, False, False]  # rejected once, then never sent again
+    assert model.thinking_off_rejected and model.n_thinking_off_calls == 0
+    assert results[2]["extra"]["actions"][0]["command"] == "ls"

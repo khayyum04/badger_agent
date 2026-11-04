@@ -189,6 +189,7 @@ class BadgerLitellmModel(LitellmModel):
     _overruns_in_row = 0
     n_overrun_notes = 0
     n_thinking_off_calls = 0
+    thinking_off_rejected = False
 
     def _prepare_messages_for_api(self, messages: list[dict]) -> list[dict]:
         if self.strip_reasoning:
@@ -206,25 +207,38 @@ class BadgerLitellmModel(LitellmModel):
             kwargs = {**kwargs, "max_tokens": min(self.thinking_cap, self.config.model_kwargs.get("max_tokens") or self.thinking_cap)}
         if boosted:
             self.n_boosted_calls += 1
-        if self.overrun_recovery and self._overruns_in_row >= OVERRUN_THINKING_OFF_AFTER:
-            extra_body = {**(self.config.model_kwargs.get("extra_body") or {}), **(kwargs.get("extra_body") or {})}
-            kwargs = {**kwargs, "extra_body": {**extra_body, **THINKING_OFF_KWARGS}}
-            self.n_thinking_off_calls += 1
-        if not self.compactor:
-            response = super()._query(messages, **kwargs)
+        thinking_off = (
+            self.overrun_recovery
+            and not self.thinking_off_rejected
+            and self._overruns_in_row >= OVERRUN_THINKING_OFF_AFTER
+        )
+        if not thinking_off:
+            response = self._complete(messages, kwargs)
         else:
-            # The parent hardcodes tools=[BASH_TOOL], so its call is repeated here with the compactor's tools.
-            response = litellm.completion(
-                model=self.config.model_name,
-                messages=messages,
-                tools=self.compactor.tools(),
-                **(self.config.model_kwargs | kwargs | self.compactor.request_kwargs()),
-            )
+            extra_body = {**(self.config.model_kwargs.get("extra_body") or {}), **(kwargs.get("extra_body") or {})}
+            try:
+                response = self._complete(messages, {**kwargs, "extra_body": {**extra_body, **THINKING_OFF_KWARGS}})
+                self.n_thinking_off_calls += 1
+            except litellm.exceptions.BadRequestError:
+                # The endpoint doesn't take the switch: stop sending it for this task, retry as a normal call.
+                self.thinking_off_rejected = True
+                response = self._complete(messages, kwargs)
         overrun = response.choices[0].finish_reason == "length"
         if self.thinking_cap:
             self._boost_next = overrun
         self._overruns_in_row = self._overruns_in_row + 1 if overrun else 0
         return response
+
+    def _complete(self, messages: list[dict[str, str]], kwargs: dict):
+        if not self.compactor:
+            return super()._query(messages, **kwargs)
+        # The parent hardcodes tools=[BASH_TOOL], so its call is repeated here with the compactor's tools.
+        return litellm.completion(
+            model=self.config.model_name,
+            messages=messages,
+            tools=self.compactor.tools(),
+            **(self.config.model_kwargs | kwargs | self.compactor.request_kwargs()),
+        )
 
     def _parse_actions(self, response) -> list[dict]:
         try:
@@ -340,6 +354,7 @@ class HarborSyncedAgent(DefaultAgent):
             "overrun_recovery": getattr(self.model, "overrun_recovery", False),
             "n_overrun_notes": getattr(self.model, "n_overrun_notes", 0),
             "n_thinking_off_calls": getattr(self.model, "n_thinking_off_calls", 0),
+            "thinking_off_rejected": getattr(self.model, "thinking_off_rejected", False),
             "time_awareness": self.time_awareness,
             "nudged_at_sec": self.nudged_at_sec,
             "submit_check": getattr(self.env, "submit_check", False),

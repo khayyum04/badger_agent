@@ -47,8 +47,9 @@ Generic (no task names), so it fits the one-prompt rule.
 - The notes may be half-wrong and anchor the model on a bad idea. The note says they are notes, not answers.
 - A reply with thinking off may be a worse command. It only happens after two overruns in a row, and the
   notes carry the thinking.
-- If the gateway rejects `chat_template_kwargs` with a 400, every recovering task fails loudly (400s abort).
-  Probe the endpoint before a run. If it silently ignores it, step 2 does nothing and steps 1/3 still apply.
+- If the gateway rejects `chat_template_kwargs` with a 400, the call is retried without it and the switch is
+  dropped for the rest of the task (`thinking_off_rejected` in metadata). If it silently ignores it, step 2
+  does nothing; both cases show in `n_thinking_off_calls` vs. replies that still overran.
 - Each note is about 6K characters (about 1.5-2K tokens) re-sent on every later turn: a small token cost.
 - Doesn't help tasks that are simply too hard or too slow (the 24 never-pass tasks).
 
