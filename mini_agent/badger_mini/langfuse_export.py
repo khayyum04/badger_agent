@@ -109,7 +109,8 @@ def summarize_trial(trial_dir: Path) -> dict | None:
         "model": None,
     }
     for key in ("thinking_cap", "time_awareness", "strip_reasoning", "n_boosted_calls", "nudged_at_sec",
-                "submit_check", "submit_checked_at_sec", "no_benchmark_lookup"):
+                "submit_check", "submit_checked_at_sec", "no_benchmark_lookup",
+                "overrun_recovery", "n_overrun_notes", "n_thinking_off_calls"):
         if key in metadata:
             summary[key] = metadata[key]
     if "compactions" in metadata:

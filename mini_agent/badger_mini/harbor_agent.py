@@ -19,6 +19,7 @@ Settings (env vars; secrets come from ``op run --env-file=mini_agent/.env.op``, 
   AGENT_TIME_AWARENESS                   on = show time used in each command result, nudge at 10 min (default: off)
   AGENT_SUBMIT_CHECK                     on = the first submit is held back and answered with SUBMIT_CHECK_MESSAGE (default: off)
   AGENT_NO_BENCHMARK_LOOKUP              on = prompt line: don't look up this benchmark or its solutions (default: off)
+  AGENT_OVERRUN_RECOVERY                 on = keep the thinking of cut-off replies as notes; thinking off after 2 in a row (default: off)
   BADGER_CONFIG                          agent yaml (default: config/terminal_bench.yaml)
 """
 
@@ -41,7 +42,7 @@ from harbor.agents.base import BaseAgent  # noqa: E402
 from harbor.environments.base import BaseEnvironment  # noqa: E402
 from harbor.models.agent.context import AgentContext  # noqa: E402
 from minisweagent.agents.default import DefaultAgent  # noqa: E402
-from minisweagent.exceptions import Submitted  # noqa: E402
+from minisweagent.exceptions import FormatError, Submitted  # noqa: E402
 import litellm  # noqa: E402
 from minisweagent.models import get_model  # noqa: E402
 from minisweagent.models.litellm_model import LitellmModel  # noqa: E402
@@ -184,6 +185,10 @@ class BadgerLitellmModel(LitellmModel):
     thinking_cap: int = 0
     _boost_next = False
     n_boosted_calls = 0
+    overrun_recovery = False
+    _overruns_in_row = 0
+    n_overrun_notes = 0
+    n_thinking_off_calls = 0
 
     def _prepare_messages_for_api(self, messages: list[dict]) -> list[dict]:
         if self.strip_reasoning:
@@ -201,6 +206,10 @@ class BadgerLitellmModel(LitellmModel):
             kwargs = {**kwargs, "max_tokens": min(self.thinking_cap, self.config.model_kwargs.get("max_tokens") or self.thinking_cap)}
         if boosted:
             self.n_boosted_calls += 1
+        if self.overrun_recovery and self._overruns_in_row >= OVERRUN_THINKING_OFF_AFTER:
+            extra_body = {**(self.config.model_kwargs.get("extra_body") or {}), **(kwargs.get("extra_body") or {})}
+            kwargs = {**kwargs, "extra_body": {**extra_body, **THINKING_OFF_KWARGS}}
+            self.n_thinking_off_calls += 1
         if not self.compactor:
             response = super()._query(messages, **kwargs)
         else:
@@ -211,16 +220,25 @@ class BadgerLitellmModel(LitellmModel):
                 tools=self.compactor.tools(),
                 **(self.config.model_kwargs | kwargs | self.compactor.request_kwargs()),
             )
+        overrun = response.choices[0].finish_reason == "length"
         if self.thinking_cap:
-            self._boost_next = response.choices[0].finish_reason == "length"
+            self._boost_next = overrun
+        self._overruns_in_row = self._overruns_in_row + 1 if overrun else 0
         return response
 
     def _parse_actions(self, response) -> list[dict]:
-        if self.compactor:
-            actions = self.compactor.parse(response.choices[0].message.tool_calls or [])
-            if actions is not None:
-                return actions
-        return super()._parse_actions(response)
+        try:
+            if self.compactor:
+                actions = self.compactor.parse(response.choices[0].message.tool_calls or [])
+                if actions is not None:
+                    return actions
+            return super()._parse_actions(response)
+        except FormatError as e:
+            if self.overrun_recovery and response.choices[0].finish_reason == "length":
+                if notes := _overrun_notes(response.choices[0].message):
+                    e.messages[0]["content"] += OVERRUN_NOTES_TEMPLATE.format(notes=notes)
+                    self.n_overrun_notes += 1
+            raise
 
 
 # Endpoint misconfiguration: fail the trial loudly instead of letting every task "finish" with no work.
@@ -319,6 +337,9 @@ class HarborSyncedAgent(DefaultAgent):
             "strip_reasoning": getattr(self.model, "strip_reasoning", False),
             "thinking_cap": getattr(self.model, "thinking_cap", 0),
             "n_boosted_calls": getattr(self.model, "n_boosted_calls", 0),
+            "overrun_recovery": getattr(self.model, "overrun_recovery", False),
+            "n_overrun_notes": getattr(self.model, "n_overrun_notes", 0),
+            "n_thinking_off_calls": getattr(self.model, "n_thinking_off_calls", 0),
             "time_awareness": self.time_awareness,
             "nudged_at_sec": self.nudged_at_sec,
             "submit_check": getattr(self.env, "submit_check", False),
@@ -331,6 +352,33 @@ class HarborSyncedAgent(DefaultAgent):
         }
         if self.compactor:
             ctx.metadata["compactions"] = self.compactor.log
+
+# Overrun recovery (AGENT_OVERRUN_RECOVERY): a reply cut off at its token limit before calling the tool is
+# discarded, so the model restarts its thinking from zero each time (31% of all output in full-capta-v1).
+# The retry note carries the start and end of that thinking, and after a few overruns in a row the next calls
+# go out with thinking off until a reply finishes normally. docs/plans/overrun-recovery.md
+OVERRUN_NOTES_HEAD = 1500
+OVERRUN_NOTES_TAIL = 4500
+OVERRUN_THINKING_OFF_AFTER = 2
+OVERRUN_NOTES_TEMPLATE = """
+
+Your notes from the cut-off reply (its thinking: the start, then the end). Continue from them; don't start
+over. They are notes, not checked results. Reply with one bash tool call now, e.g. save the plan and key
+findings to /tmp/notes.md, or run a short script that tests the next idea.
+<notes>
+{notes}
+</notes>"""
+THINKING_OFF_KWARGS = {"chat_template_kwargs": {"enable_thinking": False}}  # Qwen's switch, sent as extra_body
+
+
+def _overrun_notes(message) -> str:
+    """The cut-off reply's thinking (reasoning_content, else content), trimmed to its head and tail."""
+    text = (getattr(message, "reasoning_content", None) or getattr(message, "content", None) or "").strip()
+    text = text.removeprefix("<think>").strip()
+    if len(text) > OVERRUN_NOTES_HEAD + OVERRUN_NOTES_TAIL:
+        omitted = len(text) - OVERRUN_NOTES_HEAD - OVERRUN_NOTES_TAIL
+        text = f"{text[:OVERRUN_NOTES_HEAD]}\n[... {omitted} characters omitted ...]\n{text[-OVERRUN_NOTES_TAIL:]}"
+    return text
 
 
 def _load_config() -> dict:
@@ -412,6 +460,7 @@ class BadgerMiniAgent(BaseAgent):
         model.strip_reasoning = strip_reasoning
         model.compactor = compactor
         model.thinking_cap = int(os.environ.get("AGENT_THINKING_CAP") or 0)
+        model.overrun_recovery = os.environ.get("AGENT_OVERRUN_RECOVERY", "off").lower() == "on"
         env = HarborEnvironment(environment, asyncio.get_running_loop(), stop, **env_config)
         env.submit_check = os.environ.get("AGENT_SUBMIT_CHECK", "off").lower() == "on"
         agent = HarborSyncedAgent(
