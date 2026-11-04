@@ -15,12 +15,14 @@ Settings (env vars; secrets come from ``op run --env-file=mini_agent/.env.op``, 
   AGENT_MAX_TURNS, AGENT_COMMAND_TIMEOUT_SEC
   AGENT_STRIP_REASONING                  on = don't re-send the model's earlier thinking (default: off)
   AGENT_COMPACTION                       on = self-compaction, see compaction.py (default: off)
-  AGENT_THINKING_CAP                     max_tokens per reply; a reply after an overrun gets LLM_MAX_TOKENS (default: off)
-  AGENT_TIME_AWARENESS                   on = show time used in each command result, nudge at 10 min (default: off)
-  AGENT_SUBMIT_CHECK                     on = the first submit is held back and answered with SUBMIT_CHECK_MESSAGE (default: off)
-  AGENT_NO_BENCHMARK_LOOKUP              on = prompt line: don't look up this benchmark or its solutions (default: off)
-  AGENT_OVERRUN_RECOVERY                 on = keep the thinking of cut-off replies as notes; thinking off after 2 in a row (default: off)
+  AGENT_THINKING_CAP                     max_tokens per reply; a reply after an overrun gets LLM_MAX_TOKENS (default: 8192; 0 = off)
+  AGENT_TIME_AWARENESS                   on = show time used in each command result, nudge at 10 min (default: on)
+  AGENT_SUBMIT_CHECK                     on = the first submit is held back and answered with SUBMIT_CHECK_MESSAGE (default: on)
+  AGENT_NO_BENCHMARK_LOOKUP              on = prompt line: don't look up this benchmark or its solutions (default: on)
+  AGENT_OVERRUN_RECOVERY                 on = keep the thinking of cut-off replies as notes; thinking off after 2 in a row (default: on)
   BADGER_CONFIG                          agent yaml (default: config/terminal_bench.yaml)
+
+The five settings defaulting to on are the full-all-v1 configuration (56/89, docs/research/full-all-v1.md).
 """
 
 import asyncio
@@ -395,6 +397,13 @@ def _overrun_notes(message) -> str:
         text = f"{text[:OVERRUN_NOTES_HEAD]}\n[... {omitted} characters omitted ...]\n{text[-OVERRUN_NOTES_TAIL:]}"
     return text
 
+# Defaults: the full-all-v1 configuration. Set a switch to off (or AGENT_THINKING_CAP=0) to turn it off.
+DEFAULT_THINKING_CAP = 8192
+
+
+def _switch(name: str, default: str = "on") -> bool:
+    return (os.environ.get(name) or default).strip().lower() == "on"
+
 
 def _load_config() -> dict:
     path = Path(os.environ.get("BADGER_CONFIG") or PACKAGE_DIR / "config" / "terminal_bench.yaml")
@@ -474,10 +483,10 @@ class BadgerMiniAgent(BaseAgent):
         model = get_model(config=_model_config(config.get("model") or {}, self.model_name))
         model.strip_reasoning = strip_reasoning
         model.compactor = compactor
-        model.thinking_cap = int(os.environ.get("AGENT_THINKING_CAP") or 0)
-        model.overrun_recovery = os.environ.get("AGENT_OVERRUN_RECOVERY", "off").lower() == "on"
+        model.thinking_cap = int(os.environ.get("AGENT_THINKING_CAP") or DEFAULT_THINKING_CAP)
+        model.overrun_recovery = _switch("AGENT_OVERRUN_RECOVERY")
         env = HarborEnvironment(environment, asyncio.get_running_loop(), stop, **env_config)
-        env.submit_check = os.environ.get("AGENT_SUBMIT_CHECK", "off").lower() == "on"
+        env.submit_check = _switch("AGENT_SUBMIT_CHECK")
         agent = HarborSyncedAgent(
             model,
             env,
@@ -487,9 +496,9 @@ class BadgerMiniAgent(BaseAgent):
             output_path=self.logs_dir / "mini-swe-agent.trajectory.json",
             **agent_config,
         )
-        agent.time_awareness = os.environ.get("AGENT_TIME_AWARENESS", "off").lower() == "on"
+        agent.time_awareness = _switch("AGENT_TIME_AWARENESS")
         agent.extra_template_vars["time_awareness"] = agent.time_awareness
-        agent.extra_template_vars["no_benchmark_lookup"] = os.environ.get("AGENT_NO_BENCHMARK_LOOKUP", "off").lower() == "on"
+        agent.extra_template_vars["no_benchmark_lookup"] = _switch("AGENT_NO_BENCHMARK_LOOKUP")
         try:
             result = await _run_in_daemon_thread(agent.run, instruction)
         except asyncio.CancelledError:

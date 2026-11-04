@@ -10,6 +10,7 @@ from badger_mini.harbor_agent import (
     THINKING_OFF_KWARGS,
     BadgerLitellmModel,
     _load_config,
+    _switch,
 )
 
 FORMAT_ERROR_TEMPLATE = _load_config()["model"]["format_error_template"]
@@ -148,3 +149,12 @@ def test_rejected_switch_falls_back_to_a_normal_call(monkeypatch):
     assert sent == [False, False, True, False, False, False, False]  # rejected once, then never sent again
     assert model.thinking_off_rejected and model.n_thinking_off_calls == 0
     assert results[2]["extra"]["actions"][0]["command"] == "ls"
+
+
+@pytest.mark.parametrize("value, expected", [(None, True), ("", True), ("on", True), ("ON", True), ("off", False), ("no", False)])
+def test_switches_default_on(monkeypatch, value, expected):
+    if value is None:
+        monkeypatch.delenv("AGENT_X", raising=False)
+    else:
+        monkeypatch.setenv("AGENT_X", value)
+    assert _switch("AGENT_X") is expected
