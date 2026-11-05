@@ -55,3 +55,17 @@ files that contain the canary string or a `TBENCH` salt.
 - Use this configuration as the new baseline for submissions.
 - To attribute the gain: rerun the 26 sometimes-pass tasks once with and once without overrun recovery.
 - The remaining failures are mostly timeouts on hard tasks (17), where the model is too slow, not stuck.
+
+## Repeat: `full-all-v2` (same settings, Nov 5)
+
+**56/89 again** (leaderboard 0.62907 both times), so the mid-50s level is real: the two earlier full runs
+averaged 50.
+
+- **The same total hides 24 flips:** 12 gained, 12 lost; 44 tasks passed in both runs. With this much noise,
+  only many runs or large effects show up per task.
+- **First passes ever:** `winning-avg-corewars`, `path-tracing-reverse` and `video-processing` passed (all
+  three never passed before).
+- **`polyglot-c-py` failed:** after the checklist the agent listed `cmain`, kept it, and even rebuilt it
+  there. The checklist fixed this task in 2 of 3 runs.
+- **Failures:** 14 timeouts, 17 wrong submissions, 2 step limits.
+- **Across the four full runs:** 20 tasks have never passed.
