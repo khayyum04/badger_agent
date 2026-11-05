@@ -20,6 +20,8 @@ Settings (env vars; secrets come from ``op run --env-file=mini_agent/.env.op``, 
   AGENT_SUBMIT_CHECK                     on = the first submit is held back and answered with SUBMIT_CHECK_MESSAGE (default: on)
   AGENT_NO_BENCHMARK_LOOKUP              on = prompt line: don't look up this benchmark or its solutions (default: on)
   AGENT_OVERRUN_RECOVERY                 on = keep the thinking of cut-off replies as notes; thinking off after 2 in a row (default: on)
+  AGENT_SUBMIT_REVIEW                    on = the first submit is answered by a fresh-context reviewer instead of the checklist (default: off)
+  AGENT_KNOWN_TIME_LIMIT                 on = read the task's time limit from Harbor and show it (default: off)
   BADGER_CONFIG                          agent yaml (default: config/terminal_bench.yaml)
 
 The five settings defaulting to on are the full-all-v1 configuration (56/89, docs/research/full-all-v1.md).
@@ -27,6 +29,7 @@ The five settings defaulting to on are the full-all-v1 configuration (56/89, doc
 
 import asyncio
 import contextlib
+import inspect
 import os
 import shlex
 import threading
@@ -51,6 +54,7 @@ from minisweagent.models.litellm_model import LitellmModel  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
 from badger_mini.compaction import Compactor  # noqa: E402
+from badger_mini.review import run_review  # noqa: E402
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 # override=False: values injected by `op run` must win over anything in mini_agent/.env
@@ -66,6 +70,30 @@ NUDGE_MESSAGE = (
     "\n10 minutes used. If the required output isn't written yet, write your best version now, "
     "then keep improving it."
 )
+# Known time limit (AGENT_KNOWN_TIME_LIMIT): Harbor knows each task's limit but passes it only to its oracle
+# agent, so it's read from the running Trial (_harbor_agent_timeout_sec). Then the clock shows the real limit
+# and the nudge comes at NUDGE_AT_FRACTION of it instead of at NUDGE_AFTER_SEC.
+CLOCK_KNOWN_TEMPLATE = "\n[time used: {minutes} of {limit} min]"
+NUDGE_AT_FRACTION = 0.6
+NUDGE_KNOWN_MESSAGE = (
+    "\n{minutes} of {limit} minutes used. If the required output isn't written yet, write your best version "
+    "now, then keep improving it."
+)
+
+
+def _harbor_agent_timeout_sec() -> float | None:
+    """The running Harbor Trial's agent timeout (task limit x multiplier), found up the call stack."""
+    frame = inspect.currentframe()
+    try:
+        while frame is not None:
+            candidate = frame.f_locals.get("self")
+            value = getattr(candidate, "_agent_timeout_sec", None) if candidate is not None else None
+            if isinstance(value, (int, float)) and value > 0:
+                return float(value)
+            frame = frame.f_back
+    finally:
+        del frame
+    return None
 
 # Submit check (AGENT_SUBMIT_CHECK): the agent verifies against its own reading of the task, and the hidden
 # tests fail it on requirements it skipped (leftover build files in the output directory, changes the task
@@ -101,7 +129,9 @@ class HarborEnvironment:
         self.submit_checked_at: float | None = None
         """time.time() of the held-back first submit; None until then."""
 
-    def execute(self, action: dict, cwd: str = "", *, timeout: int | None = None) -> dict[str, Any]:
+    submit_reviewer: Any = None  # callable returning the message for a held-back submit (AGENT_SUBMIT_REVIEW)
+
+    def execute(self, action: dict, cwd: str = "", *, timeout: int | None = None, check: bool = True) -> dict[str, Any]:
         if self._stop.is_set():
             raise RuntimeError("Harbor stopped the agent (task timeout)")
         timeout = timeout or self.config.timeout
@@ -142,7 +172,8 @@ class HarborEnvironment:
                 "exception_info": f"An error occurred while executing the command: {e}",
                 "extra": {"exception_type": type(e).__name__, "exception": str(e)},
             }
-        self._check_finished(output)
+        if check:
+            self._check_finished(output)
         return output
 
     def _check_finished(self, output: dict):
@@ -150,7 +181,7 @@ class HarborEnvironment:
         if lines and lines[0].strip() == SUBMIT_MARKER and output["returncode"] == 0:
             if self.submit_check and self.submit_checked_at is None:
                 self.submit_checked_at = time.time()
-                output["output"] = SUBMIT_CHECK_MESSAGE
+                output["output"] = self.submit_reviewer() if self.submit_reviewer else SUBMIT_CHECK_MESSAGE
                 return
             submission = "".join(lines[1:])
             raise Submitted(
@@ -298,6 +329,9 @@ class HarborSyncedAgent(DefaultAgent):
         self.nudged_at_sec: int | None = None
         self.extra_template_vars["time_awareness"] = False  # the prompt templates render with StrictUndefined
         self.extra_template_vars["no_benchmark_lookup"] = False
+        self.time_limit_sec: float | None = None
+        self.extra_template_vars["time_limit_min"] = None
+        self.review: dict | None = None
 
     def query(self) -> dict:
         if self._stop.is_set():
@@ -323,11 +357,37 @@ class HarborSyncedAgent(DefaultAgent):
 
     def _clock_text(self) -> str:
         elapsed = int(time.time() - self._start_time)
+        if self.time_limit_sec:
+            limit = round(self.time_limit_sec / 60)
+            text = CLOCK_KNOWN_TEMPLATE.format(minutes=elapsed // 60, limit=limit)
+            if self.nudged_at_sec is None and elapsed >= NUDGE_AT_FRACTION * self.time_limit_sec:
+                self.nudged_at_sec = elapsed
+                text += NUDGE_KNOWN_MESSAGE.format(minutes=elapsed // 60, limit=limit)
+            return text
         text = CLOCK_TEMPLATE.format(minutes=elapsed // 60)
         if self.nudged_at_sec is None and elapsed >= NUDGE_AFTER_SEC:
             self.nudged_at_sec = elapsed
             text += NUDGE_MESSAGE
         return text
+
+    def submit_review(self) -> str:
+        """Runs the fresh-context reviewer (review.py); its tokens count like the agent's."""
+
+        def add_usage(n_in: int, n_out: int):
+            self.n_input_tokens += n_in
+            self.n_output_tokens += n_out
+            self._sync_context()
+
+        self.review = run_review(
+            task=self.extra_template_vars.get("task", ""),
+            model_name=self.model.config.model_name,
+            model_kwargs=dict(self.model.config.model_kwargs),
+            run_command=lambda command, timeout: self.env.execute({"command": command}, timeout=timeout, check=False),
+            add_usage=add_usage,
+            should_stop=self._stop.is_set,
+        )
+        self._sync_context()
+        return self.review["message"]
 
     def add_messages(self, *messages: dict) -> list[dict]:
         for message in messages:
@@ -366,6 +426,11 @@ class HarborSyncedAgent(DefaultAgent):
                 else None
             ),
             "no_benchmark_lookup": self.extra_template_vars.get("no_benchmark_lookup", False),
+            "submit_review": getattr(self.env, "submit_reviewer", None) is not None,
+            "review_verdict": (self.review or {}).get("verdict", "")[:1000] or None,
+            "review_commands": (self.review or {}).get("n_commands"),
+            "review_sec": (self.review or {}).get("seconds"),
+            "time_limit_sec": self.time_limit_sec,
         }
         if self.compactor:
             ctx.metadata["compactions"] = self.compactor.log
@@ -499,6 +564,13 @@ class BadgerMiniAgent(BaseAgent):
         agent.time_awareness = _switch("AGENT_TIME_AWARENESS")
         agent.extra_template_vars["time_awareness"] = agent.time_awareness
         agent.extra_template_vars["no_benchmark_lookup"] = _switch("AGENT_NO_BENCHMARK_LOOKUP")
+        if _switch("AGENT_SUBMIT_REVIEW", default="off"):
+            env.submit_check = True  # the review uses the submit check's hold on the first submit
+            env.submit_reviewer = agent.submit_review
+        if agent.time_awareness and _switch("AGENT_KNOWN_TIME_LIMIT", default="off"):
+            agent.time_limit_sec = _harbor_agent_timeout_sec()
+            if agent.time_limit_sec:
+                agent.extra_template_vars["time_limit_min"] = round(agent.time_limit_sec / 60)
         try:
             result = await _run_in_daemon_thread(agent.run, instruction)
         except asyncio.CancelledError:

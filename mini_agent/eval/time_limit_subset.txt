@@ -1,0 +1,25 @@
+# Known time limit (AGENT_KNOWN_TIME_LIMIT, docs/plans/review-and-time-limit.md): every task that timed out
+# in full-all-v1 or full-all-v2, with its limit. # = passes in those two runs (the A side).
+regex-chess                       # 0/2  limit 60 min
+winning-avg-corewars              # 1/2  limit 60 min
+extract-moves-from-video          # 0/2  limit 30 min
+feal-differential-cryptanalysis   # 1/2  limit 30 min
+mailman                           # 2/2  limit 30 min
+make-mips-interpreter             # 0/2  limit 30 min
+path-tracing                      # 1/2  limit 30 min
+path-tracing-reverse              # 1/2  limit 30 min
+caffe-cifar-10                    # 0/2  limit 20 min
+code-from-image                   # 0/2  limit 20 min
+adaptive-rejection-sampler        # 0/2  limit 15 min
+chess-best-move                   # 0/2  limit 15 min
+gcode-to-text                     # 1/2  limit 15 min
+gpt2-codegolf                     # 0/2  limit 15 min
+largest-eigenval                  # 1/2  limit 15 min
+make-doom-for-mips                # 0/2  limit 15 min
+password-recovery                 # 1/2  limit 15 min
+polyglot-rust-c                   # 0/2  limit 15 min
+qemu-alpine-ssh                   # 0/2  limit 15 min
+qemu-startup                      # 0/2  limit 15 min
+tune-mjcf                         # 1/2  limit 15 min
+write-compressor                  # 0/2  limit 15 min
+overfull-hbox                     # 1/2  limit 12 min
