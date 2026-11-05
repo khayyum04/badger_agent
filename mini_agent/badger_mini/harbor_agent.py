@@ -22,6 +22,7 @@ Settings (env vars; secrets come from ``op run --env-file=mini_agent/.env.op``, 
   AGENT_OVERRUN_RECOVERY                 on = keep the thinking of cut-off replies as notes; thinking off after 2 in a row (default: on)
   AGENT_SUBMIT_REVIEW                    on = the first submit is answered by a fresh-context reviewer instead of the checklist (default: off)
   AGENT_KNOWN_TIME_LIMIT                 on = read the task's time limit from Harbor and show it (default: off)
+  AGENT_REASONING_EFFORT                 low | medium | high | xhigh, sent as reasoning_effort (default: unset = model's own, xhigh)
   BADGER_CONFIG                          agent yaml (default: config/terminal_bench.yaml)
 
 The five settings defaulting to on are the full-all-v1 configuration (56/89, docs/research/full-all-v1.md).
@@ -223,6 +224,7 @@ class BadgerLitellmModel(LitellmModel):
     n_overrun_notes = 0
     n_thinking_off_calls = 0
     thinking_off_rejected = False
+    reasoning_effort: str | None = None
 
     def _prepare_messages_for_api(self, messages: list[dict]) -> list[dict]:
         if self.strip_reasoning:
@@ -240,6 +242,9 @@ class BadgerLitellmModel(LitellmModel):
             kwargs = {**kwargs, "max_tokens": min(self.thinking_cap, self.config.model_kwargs.get("max_tokens") or self.thinking_cap)}
         if boosted:
             self.n_boosted_calls += 1
+        if self.reasoning_effort:
+            extra_body = {**(self.config.model_kwargs.get("extra_body") or {}), **(kwargs.get("extra_body") or {})}
+            kwargs = {**kwargs, "extra_body": {**extra_body, "reasoning_effort": self.reasoning_effort}}
         thinking_off = (
             self.overrun_recovery
             and not self.thinking_off_rejected
@@ -431,6 +436,7 @@ class HarborSyncedAgent(DefaultAgent):
             "review_commands": (self.review or {}).get("n_commands"),
             "review_sec": (self.review or {}).get("seconds"),
             "time_limit_sec": self.time_limit_sec,
+            "reasoning_effort": getattr(self.model, "reasoning_effort", None),
         }
         if self.compactor:
             ctx.metadata["compactions"] = self.compactor.log
@@ -451,6 +457,20 @@ findings to /tmp/notes.md, or run a short script that tests the next idea.
 {notes}
 </notes>"""
 THINKING_OFF_KWARGS = {"chat_template_kwargs": {"enable_thinking": False}}  # Qwen's switch, sent as extra_body
+
+# Reasoning effort (AGENT_REASONING_EFFORT): Qwen3.8 thinks at "xhigh" unless told otherwise. On a hard maths
+# question, "low" used about a quarter of the tokens with the same answer (endpoint probe, 2026-11-05).
+# Sent as a top-level request field (extra_body), the form that cut the most in that probe.
+REASONING_EFFORTS = ("low", "medium", "high", "xhigh")
+
+
+def _reasoning_effort() -> str | None:
+    value = (os.environ.get("AGENT_REASONING_EFFORT") or "").strip().lower()
+    if not value:
+        return None
+    if value not in REASONING_EFFORTS:
+        raise ValueError(f"AGENT_REASONING_EFFORT={value!r}: use one of {', '.join(REASONING_EFFORTS)}, or leave it unset")
+    return value
 
 
 def _overrun_notes(message) -> str:
@@ -550,6 +570,7 @@ class BadgerMiniAgent(BaseAgent):
         model.compactor = compactor
         model.thinking_cap = int(os.environ.get("AGENT_THINKING_CAP") or DEFAULT_THINKING_CAP)
         model.overrun_recovery = _switch("AGENT_OVERRUN_RECOVERY")
+        model.reasoning_effort = _reasoning_effort()
         env = HarborEnvironment(environment, asyncio.get_running_loop(), stop, **env_config)
         env.submit_check = _switch("AGENT_SUBMIT_CHECK")
         agent = HarborSyncedAgent(

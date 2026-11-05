@@ -10,6 +10,7 @@ from badger_mini.harbor_agent import (
     THINKING_OFF_KWARGS,
     BadgerLitellmModel,
     _load_config,
+    _reasoning_effort,
     _switch,
 )
 
@@ -158,3 +159,36 @@ def test_switches_default_on(monkeypatch, value, expected):
     else:
         monkeypatch.setenv("AGENT_X", value)
     assert _switch("AGENT_X") is expected
+
+
+def test_reasoning_effort_sent_on_every_call_and_kept_with_thinking_off(calls):
+    sent, script = calls
+    script += [response("length", "a"), response("length", "b"), response("tool_calls", tool_call=True)]
+    model = make_model(recovery=True, model_kwargs={"max_tokens": 16384, "extra_body": {"top_k": 20}})
+    model.reasoning_effort = "medium"
+    for _ in range(3):
+        query(model)
+    assert all(k["extra_body"]["reasoning_effort"] == "medium" and k["extra_body"]["top_k"] == 20 for k in sent)
+    assert thinking_off(sent[2])  # the thinking-off call still carries both
+
+
+def test_reasoning_effort_unset_sends_nothing(calls):
+    sent, script = calls
+    script += [response("tool_calls", tool_call=True)]
+    query(make_model(recovery=False))
+    assert "extra_body" not in sent[0]
+
+
+@pytest.mark.parametrize("value, expected", [(None, None), ("", None), ("medium", "medium"), (" LOW ", "low")])
+def test_reasoning_effort_setting(monkeypatch, value, expected):
+    if value is None:
+        monkeypatch.delenv("AGENT_REASONING_EFFORT", raising=False)
+    else:
+        monkeypatch.setenv("AGENT_REASONING_EFFORT", value)
+    assert _reasoning_effort() == expected
+
+
+def test_reasoning_effort_typo_fails_loudly(monkeypatch):
+    monkeypatch.setenv("AGENT_REASONING_EFFORT", "lwo")
+    with pytest.raises(ValueError):
+        _reasoning_effort()
