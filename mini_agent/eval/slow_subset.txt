@@ -1,0 +1,37 @@
+# Slow-task list for time-limit fixes (docs/plans/thinking-cap.md).
+# 28 tasks that hit the time limit or quit after 5 overruns in jobs/full-mini-v1 (Oct 1).
+gcode-to-text
+schemelike-metacircular-eval
+largest-eigenval
+cancel-async-tasks
+raman-fitting
+qemu-alpine-ssh
+cobol-modernization
+polyglot-rust-c
+make-doom-for-mips
+adaptive-rejection-sampler
+chess-best-move
+regex-chess
+write-compressor
+gpt2-codegolf
+financial-document-processor
+filter-js-from-html
+code-from-image
+caffe-cifar-10
+model-extraction-relu-logits
+torch-pipeline-parallelism
+protein-assembly
+dna-assembly
+path-tracing-reverse
+extract-moves-from-video
+feal-differential-cryptanalysis
+winning-avg-corewars
+circuit-fibsqrt
+train-fasttext
+# Regression check: 6 passes from full-mini-v1 with the most thinking (5-15 min each).
+large-scale-text-editing
+feal-linear-cryptanalysis
+sqlite-db-truncate
+custom-memory-heap-crash
+portfolio-optimization
+regex-log
