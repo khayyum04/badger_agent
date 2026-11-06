@@ -213,3 +213,8 @@ def test_time_limit_found_through_harbors_async_call():
             return await asyncio.wait_for(Agent().run(), timeout=5)
 
     assert asyncio.run(Trial()._run_agent_phase()) == 900.0
+
+
+def test_reviewer_is_told_to_work_in_tmp():
+    prompt = review_mod.REVIEW_SYSTEM
+    assert "Never write anything in the task's directories" in prompt and "/tmp" in prompt

@@ -47,7 +47,8 @@ Testing them in dev runs is fine.
   limit can tip into a timeout.
 - **The reviewer can be wrong.** The message tells the agent to ignore findings it disagrees with, and to
   say why.
-- **The reviewer could modify files** despite the instruction; nothing enforces read-only.
+- **The reviewer could modify files** despite the instruction; nothing enforces read-only. It's told to copy
+  anything it runs or compiles to /tmp, since a leftover binary or log in a task directory can fail the task.
 - **The time-limit lookup relies on Harbor internals** (the Trial's attribute name and the call stack).
   Pinned at harbor 0.23.0; tested with `asyncio.wait_for` as Harbor uses it. If it breaks, the feature turns
   itself off.

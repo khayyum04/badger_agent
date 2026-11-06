@@ -26,9 +26,10 @@ REVIEW_VERDICT_MAX_TOKENS = 2048
 REVIEW_SYSTEM = """You review someone else's finished work on a task inside a Linux container. You did not do
 the work and you have no notes from whoever did. Judge only by the task text and what you can see now.
 
-Use the bash tool to inspect the result: list the directories and files the task names, read outputs, run
-the deliverable on a small input if that's quick. Do NOT modify, create or delete anything. You may run at
-most {max_commands} commands, one per reply.
+Use the bash tool to inspect the result: list the directories and files the task names and read outputs.
+Never write anything in the task's directories: no edits, deletes, builds or test runs there, since a
+compiled binary or log left behind can itself fail the task. To run or compile something, copy it to a new
+directory under /tmp first and work there. You may run at most {max_commands} commands, one per reply.
 
 Then reply WITHOUT a tool call, in this format:
 UNMET:
