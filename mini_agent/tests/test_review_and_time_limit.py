@@ -84,6 +84,25 @@ def test_review_stops_after_max_commands(script):
     assert result["verdict"] == "ALL MET"
 
 
+def test_review_gives_verdict_when_time_budget_is_used(script):
+    """After REVIEW_TIME_BUDGET_SEC the next call must answer, with a short reply budget, even mid-inspection."""
+    sent, replies = script
+    replies += [reply(command="ls"), reply(command="cat out.txt"), reply("UNMET:\n- out.txt is empty")]
+    now = [0.0]
+
+    def run_command(command, timeout):
+        now[0] += 100  # each command takes 100 s
+        return {"output": "", "returncode": 0}
+
+    result = review_mod.run_review(
+        task="t", model_name="openai/test", model_kwargs={"max_tokens": 16384},
+        run_command=run_command, add_usage=lambda i, o: None, clock=lambda: now[0],
+    )
+    assert result["n_commands"] == 2  # 200 s used: the third call is the verdict
+    assert "tools" not in sent[2] and sent[2]["max_tokens"] == review_mod.REVIEW_VERDICT_MAX_TOKENS
+    assert result["verdict"] == "UNMET:\n- out.txt is empty"
+
+
 def test_review_error_never_raises(monkeypatch):
     def boom(**kwargs):
         raise litellm.exceptions.APIConnectionError("down", "openai", "test")

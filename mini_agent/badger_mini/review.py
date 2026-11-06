@@ -18,6 +18,10 @@ REVIEW_MAX_COMMANDS = 6
 REVIEW_COMMAND_TIMEOUT = 60
 REVIEW_MAX_TOKENS = 8192
 REVIEW_OUTPUT_CHARS = 4000
+# Wall-clock budget: once it's used, the next call must give the verdict, with a short reply budget.
+# Keeps the worst case near REVIEW_TIME_BUDGET_SEC + one short call instead of ~7 full-length calls.
+REVIEW_TIME_BUDGET_SEC = 180
+REVIEW_VERDICT_MAX_TOKENS = 2048
 
 REVIEW_SYSTEM = """You review someone else's finished work on a task inside a Linux container. You did not do
 the work and you have no notes from whoever did. Judge only by the task text and what you can see now.
@@ -61,12 +65,13 @@ def run_review(
     run_command: Callable[[str, int], dict],
     add_usage: Callable[[int, int], None],
     should_stop: Callable[[], bool] = lambda: False,
+    clock: Callable[[], float] = time.time,
 ) -> dict[str, Any]:
     """Runs the reviewer. Returns {"message": text for the agent, "verdict", "n_commands", "seconds"}.
 
     Never raises: any error yields a short note, so the agent's submit flow keeps working.
     """
-    start = time.time()
+    start = clock()
     messages: list[dict] = [
         {"role": "system", "content": REVIEW_SYSTEM.format(max_commands=REVIEW_MAX_COMMANDS)},
         {"role": "user", "content": REVIEW_TASK.format(task=task)},
@@ -78,14 +83,16 @@ def run_review(
         for _ in range(REVIEW_MAX_COMMANDS + 2):
             if should_stop():
                 break
-            final = n_commands >= REVIEW_MAX_COMMANDS
+            out_of_time = clock() - start >= REVIEW_TIME_BUDGET_SEC
+            final = n_commands >= REVIEW_MAX_COMMANDS or out_of_time
             if final:
                 messages.append({"role": "user", "content": REVIEW_STOP})
+            call_kwargs = {**kwargs, "max_tokens": min(kwargs["max_tokens"], REVIEW_VERDICT_MAX_TOKENS)} if final else kwargs
             response = litellm.completion(
                 model=model_name,
                 messages=messages,
                 **({} if final else {"tools": [BASH_TOOL]}),
-                **kwargs,
+                **call_kwargs,
             )
             add_usage(*_usage(response))
             message = response.choices[0].message
@@ -103,7 +110,9 @@ def run_review(
                 command = json.loads(call.function.arguments).get("command", "")
             except Exception:
                 command = ""
-            result = run_command(command, REVIEW_COMMAND_TIMEOUT) if command else {"output": "no command", "returncode": -1}
+            remaining = REVIEW_TIME_BUDGET_SEC - (clock() - start)
+            timeout = int(max(10, min(REVIEW_COMMAND_TIMEOUT, remaining)))
+            result = run_command(command, timeout) if command else {"output": "no command", "returncode": -1}
             n_commands += 1
             output = (result.get("output") or "")[-REVIEW_OUTPUT_CHARS:]
             messages.append(
@@ -116,5 +125,5 @@ def run_review(
         "message": REVIEW_RESULT.format(verdict=verdict),
         "verdict": verdict,
         "n_commands": n_commands,
-        "seconds": int(time.time() - start),
+        "seconds": int(clock() - start),
     }

@@ -20,7 +20,8 @@ Per run, the failures are about 14-17 timeouts and 14-17 wrong submissions.
 1. **`AGENT_SUBMIT_REVIEW=on`.** At the first submit (the submit check's hold), a reviewer runs (`review.py`).
    - It's the same model and endpoint, with a fresh context: it gets only the task text.
    - It may run up to 6 inspection commands (60 s each), without changing anything, then answers
-     `UNMET: ...` or `ALL MET`.
+     `UNMET: ...` or `ALL MET`. After 3 minutes (`REVIEW_TIME_BUDGET_SEC`) the next call must give the
+     verdict, with at most 2,048 tokens, so the worst case stays near 3-4 minutes.
    - Its verdict replaces the checklist as that submit's output, and the agent's next submit goes through.
    - Its tokens count toward the task's total.
    - Any reviewer error gives a short note instead, so the agent can still submit.
@@ -41,7 +42,8 @@ Testing them in dev runs is fine.
 
 ## Weak spots
 
-- **The review costs time:** about 1-3 minutes, at the moment a task is closest to done. Tasks near their
+- **The review costs time:** typically 2-4 minutes, capped near 3-4 by the time budget, at the moment a task
+  is closest to done. Tasks near their
   limit can tip into a timeout.
 - **The reviewer can be wrong.** The message tells the agent to ignore findings it disagrees with, and to
   say why.
