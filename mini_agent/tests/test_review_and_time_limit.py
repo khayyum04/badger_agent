@@ -71,6 +71,8 @@ def test_review_inspects_then_reports(script):
     assert ran == ["ls /app/polyglot"]
     assert "extra file cmain" in result["message"] and "submit again" in result["message"]
     assert result["n_commands"] == 1
+    assert [m["role"] for m in result["transcript"]] == ["system", "user", "assistant", "tool"]
+    assert result["transcript"][2]["tool_calls"][0]["function"]["arguments"] == '{"command": "ls /app/polyglot"}'
     assert usage == [(100, 10), (100, 10)]  # every reviewer call is counted
     assert "Write /app/polyglot/main.py.c only." in sent[0]["messages"][1]["content"]  # fresh context: task only
     assert sent[0]["max_tokens"] == review_mod.REVIEW_MAX_TOKENS
@@ -218,3 +220,16 @@ def test_time_limit_found_through_harbors_async_call():
 def test_reviewer_is_told_to_work_in_tmp():
     prompt = review_mod.REVIEW_SYSTEM
     assert "Never write anything in the task's directories" in prompt and "/tmp" in prompt
+
+
+def test_submit_review_saves_the_reviewer_conversation(agent, monkeypatch, tmp_path):
+    import json
+
+    import badger_mini.harbor_agent as ha
+
+    fake = {"message": "M", "verdict": "ALL MET", "n_commands": 1, "seconds": 5, "transcript": [{"role": "user", "content": "t"}]}
+    monkeypatch.setattr(ha, "run_review", lambda **kw: fake)
+    agent.model.config = type("C", (), {"model_name": "openai/test", "model_kwargs": {}})()
+    assert agent.submit_review() == "M"
+    saved = json.loads((tmp_path / "review.json").read_text())
+    assert saved["verdict"] == "ALL MET" and saved["transcript"] == [{"role": "user", "content": "t"}] and "message" not in saved

@@ -31,6 +31,7 @@ The five settings defaulting to on are the full-all-v1 configuration (56/89, doc
 import asyncio
 import contextlib
 import inspect
+import json
 import os
 import shlex
 import threading
@@ -391,6 +392,10 @@ class HarborSyncedAgent(DefaultAgent):
             add_usage=add_usage,
             should_stop=self._stop.is_set,
         )
+        # The reviewer's own conversation, for analysis: what it ran and why it decided (not in the trajectory).
+        with contextlib.suppress(Exception):
+            path = Path(self.config.output_path).with_name("review.json")
+            path.write_text(json.dumps({k: v for k, v in self.review.items() if k != "message"}, indent=1, default=str))
         self._sync_context()
         return self.review["message"]
 

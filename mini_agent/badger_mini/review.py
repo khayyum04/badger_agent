@@ -124,6 +124,7 @@ def run_review(
     verdict = verdict or "(no verdict)"
     return {
         "message": REVIEW_RESULT.format(verdict=verdict),
+        "transcript": [{k: m[k] for k in ("role", "content", "tool_calls") if k in m} for m in messages],
         "verdict": verdict,
         "n_commands": n_commands,
         "seconds": int(clock() - start),
