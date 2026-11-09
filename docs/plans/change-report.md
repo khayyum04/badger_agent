@@ -25,7 +25,8 @@ long listing and missed it: the reviewer's own `ls` showed `cmain`, and it still
 - At the first submit (the submit check's hold), take the snapshot again and append a short factual list to
   the checklist:
   - **Created / Changed / Deleted** files, 25 per section at most. Files in a directory that didn't exist at the
-    start (a build dir, `__pycache__`) are one line, `dir/ (N files, size)`, so they can't push `cmain` off the list;
+    start (a build dir, `__pycache__`) with 6 or more files are one line, `dir/ (N files, size)`, so they can't push `cmain` off the list;
+    smaller ones stay file by file (smoke-change-v2: the new `/app/polyglot/` folded to one line hid `cmain`);
     the same for a directory that was deleted whole.
   - **Commits** that existed at the start and are gone.
   - Then: "does the task ask for it? If not, delete or restore it."

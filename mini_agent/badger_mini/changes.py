@@ -18,6 +18,7 @@ ALWAYS_DIRS = ["/app"]
 MAX_DIRS = 6
 MAX_FILES = 20000      # more than this and the snapshot is skipped (a diff would be incomplete)
 MAX_LISTED = 25        # per section in the report
+GROUP_MIN = 6          # a new/removed directory is one line only from this many files on
 MAX_COMMITS = 5000
 SEP = "|"
 
@@ -109,13 +110,18 @@ def _new_dir(path: str, other: set[str], roots: list[str]) -> str | None:
 
 
 def _grouped(paths: list[str], files: dict, other_files: dict, roots: list[str]) -> list[str]:
-    """One line per file, except files in a directory the other snapshot doesn't have (a build dir,
-    __pycache__): one line per such directory, so they don't push single files off the list."""
+    """One line per file, except a directory the other snapshot doesn't have that holds GROUP_MIN files or
+    more (a build dir): one line for it, so it doesn't push single files off the list. Small new directories
+    stay file by file: the deliverable's own directory is often new, and its stray binary must be named."""
     other_dirs = {p.rsplit("/", i)[0] for p in other_files for i in range(1, p.count("/"))}
     groups: dict[str, list[str]] = {}
     for p in paths:
         groups.setdefault(_new_dir(p, other_dirs, roots) or p, []).append(p)
     lines = []
+    for key, members in list(groups.items()):
+        if len(members) < GROUP_MIN and members != [key]:
+            del groups[key]
+            groups.update({m: [m] for m in members})
     for key, members in sorted(groups.items()):
         size = _size(sum(files[m][0] for m in members))
         lines.append(f"{key} ({size})" if members == [key] else f"{key}/ ({len(members)} files, {size})")

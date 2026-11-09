@@ -140,9 +140,18 @@ def test_new_file_in_existing_dir_is_listed_alone():
 
 
 def test_deleted_dir_is_one_line():
-    before = snap({"/app/data/a": 1, "/app/data/b": 1, "/app/x": 1})
+    before = snap({**{f"/app/data/{i}": 1 for i in range(6)}, "/app/x": 1})
     after = snap({"/app/x": 1})
-    assert "/app/data/ (2 files, 2 B)" in changes.report(before, after, {}, {})
+    assert "/app/data/ (6 files, 6 B)" in changes.report(before, after, {}, {})
+
+
+def test_small_new_dir_is_listed_file_by_file():
+    # smoke-change-v2: /app/polyglot/ was new, and folding it hid cmain
+    before = snap({})
+    after = snap({"/app/polyglot/main.py.c": 900, "/app/polyglot/cmain": 16000})
+    text = changes.report(before, after, {}, {})
+    assert "  /app/polyglot/cmain (16 KB)" in text and "  /app/polyglot/main.py.c (900 B)" in text
+    assert "files," not in text
 
 
 def test_long_sections_are_cut():
