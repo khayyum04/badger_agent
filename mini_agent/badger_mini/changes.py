@@ -13,6 +13,7 @@ import shlex
 # Directories never snapshotted as a whole: too big, or system-wide noise.
 SKIP_DIRS = {"/", "/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc", "/proc", "/sys", "/dev", "/tmp", "/var",
              "/opt", "/root", "/home", "/run", "/boot", "/mnt", "/media", "/srv", "/snap"}
+NEVER_UNDER = ("/proc/", "/sys/", "/dev/", "/run/")  # pseudo-filesystems: change on their own
 ALWAYS_DIRS = ["/app"]
 MAX_DIRS = 6
 MAX_FILES = 20000      # more than this and the snapshot is skipped (a diff would be incomplete)
@@ -20,7 +21,7 @@ MAX_LISTED = 25        # per section in the report
 MAX_COMMITS = 5000
 SEP = "|"
 
-_PATH = re.compile(r"(?<![\w.~$-])(/(?:[A-Za-z0-9_.+@-]+/)*[A-Za-z0-9_.+@-]+/?)")
+_PATH = re.compile(r"(?<![\w.~$:/-])(/(?:[A-Za-z0-9_.+@-]+/)*[A-Za-z0-9_.+@-]+/?)")
 
 
 def candidate_dirs(task: str) -> list[str]:
@@ -34,7 +35,7 @@ def candidate_dirs(task: str) -> list[str]:
         if len(parts) > 2:
             options.append("/".join(parts[:-1]))  # parent, for file paths
         for option in options:
-            if option and option not in SKIP_DIRS and not any(option == d or option.startswith(d + "/") for d in dirs):
+            if option and option not in SKIP_DIRS and not option.startswith(NEVER_UNDER) and not any(option == d or option.startswith(d + "/") for d in dirs):
                 dirs = [d for d in dirs if not d.startswith(option + "/")] + [option]
     return dirs[:MAX_DIRS]
 
@@ -66,11 +67,14 @@ def parse_snapshot(output: str) -> dict | None:
 
 
 def git_command(dirs: list[str]) -> str:
-    """For each git repo under the dirs: REPO|path, then its commit hashes (all refs)."""
+    """For each git repo under the dirs: REPO|path, then the commits reachable from local branches, tags and
+    HEAD. Not --all: `git filter-branch` keeps the old history under refs/original, and remote refs keep it too,
+    so lost commits would never show as gone."""
     quoted = " ".join(shlex.quote(d) for d in dirs)
+    git = "git -c safe.directory='*' -C \"$r\" rev-list --branches --tags"
     return (
         f"find {quoted} -maxdepth 3 -name .git 2>/dev/null | while read -r g; do r=$(dirname \"$g\"); "
-        f"echo \"REPO{SEP}$r\"; git -c safe.directory='*' -C \"$r\" rev-list --all 2>/dev/null | head -n {MAX_COMMITS}; done"
+        f"echo \"REPO{SEP}$r\"; {{ {git} HEAD 2>/dev/null || {git} 2>/dev/null; }} | head -n {MAX_COMMITS + 1}; done"
     )
 
 
@@ -83,11 +87,39 @@ def parse_git(output: str) -> dict[str, set[str]]:
             repos[current] = set()
         elif current and re.fullmatch(r"[0-9a-f]{7,64}", line.strip()):
             repos[current].add(line.strip())
-    return repos
+    # A cut-off list can't be compared: new commits push old ones out of the window.
+    return {r: c for r, c in repos.items() if len(c) <= MAX_COMMITS}
 
 
 def _size(n: int) -> str:
     return f"{n} B" if n < 1024 else f"{n / 1024:.0f} KB" if n < 1024 * 1024 else f"{n / 1024 / 1024:.1f} MB"
+
+
+def _new_dir(path: str, other: set[str], roots: list[str]) -> str | None:
+    """The shallowest directory above path (below a root) that holds no file of the other snapshot."""
+    root = max((r for r in roots if path.startswith(r.rstrip("/") + "/")), key=len, default=None)
+    if root is None:
+        return None
+    parts = path[len(root.rstrip("/")) + 1:].split("/")[:-1]
+    for i in range(1, len(parts) + 1):
+        d = root.rstrip("/") + "/" + "/".join(parts[:i])
+        if d not in other:
+            return d
+    return None
+
+
+def _grouped(paths: list[str], files: dict, other_files: dict, roots: list[str]) -> list[str]:
+    """One line per file, except files in a directory the other snapshot doesn't have (a build dir,
+    __pycache__): one line per such directory, so they don't push single files off the list."""
+    other_dirs = {p.rsplit("/", i)[0] for p in other_files for i in range(1, p.count("/"))}
+    groups: dict[str, list[str]] = {}
+    for p in paths:
+        groups.setdefault(_new_dir(p, other_dirs, roots) or p, []).append(p)
+    lines = []
+    for key, members in sorted(groups.items()):
+        size = _size(sum(files[m][0] for m in members))
+        lines.append(f"{key} ({size})" if members == [key] else f"{key}/ ({len(members)} files, {size})")
+    return lines
 
 
 def _section(title: str, items: list[str]) -> list[str]:
@@ -120,9 +152,9 @@ def report(before: dict | None, after: dict | None, git_before: dict, git_after:
     deleted = sorted(p for p in b if p not in a)
     changed = sorted(p for p in a if p in b and a[p] != b[p])
     lines = ["", f"What changed in {', '.join(before['dirs']) or 'the task directories'} since you started:"]
-    lines += _section("Created", [f"{p} ({_size(a[p][0])})" for p in created])
+    lines += _section("Created", _grouped(created, a, b, before["dirs"]))
     lines += _section("Changed", changed)
-    lines += _section("Deleted", deleted)
+    lines += _section("Deleted", _grouped(deleted, b, a, before["dirs"]))
     for repo, commits in sorted(git_before.items()):
         gone = commits - git_after.get(repo, set())
         if gone:
