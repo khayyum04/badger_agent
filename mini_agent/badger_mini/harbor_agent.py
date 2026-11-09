@@ -22,6 +22,7 @@ Settings (env vars; secrets come from ``op run --env-file=mini_agent/.env.op``, 
   AGENT_OVERRUN_RECOVERY                 on = keep the thinking of cut-off replies as notes; thinking off after 2 in a row (default: on)
   AGENT_SUBMIT_REVIEW                    on = the first submit is answered by a fresh-context reviewer instead of the checklist (default: off)
   AGENT_KNOWN_TIME_LIMIT                 on = read the task's time limit from Harbor and show it (default: off)
+  AGENT_CHANGE_REPORT                    on = snapshot the task's dirs at the start; the submit checklist lists what changed (default: off)
   AGENT_REASONING_EFFORT                 low | medium | high | xhigh, sent as reasoning_effort (default: unset = model's own, xhigh)
   BADGER_CONFIG                          agent yaml (default: config/terminal_bench.yaml)
 
@@ -56,6 +57,7 @@ from minisweagent.models.litellm_model import LitellmModel  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 
 from badger_mini.compaction import Compactor  # noqa: E402
+from badger_mini import changes  # noqa: E402
 from badger_mini.review import run_review  # noqa: E402
 
 PACKAGE_DIR = Path(__file__).resolve().parent
@@ -132,6 +134,7 @@ class HarborEnvironment:
         """time.time() of the held-back first submit; None until then."""
 
     submit_reviewer: Any = None  # callable returning the message for a held-back submit (AGENT_SUBMIT_REVIEW)
+    submit_notes: Any = None  # callable returning text appended to the checklist (AGENT_CHANGE_REPORT)
 
     def execute(self, action: dict, cwd: str = "", *, timeout: int | None = None, check: bool = True) -> dict[str, Any]:
         if self._stop.is_set():
@@ -183,7 +186,10 @@ class HarborEnvironment:
         if lines and lines[0].strip() == SUBMIT_MARKER and output["returncode"] == 0:
             if self.submit_check and self.submit_checked_at is None:
                 self.submit_checked_at = time.time()
-                output["output"] = self.submit_reviewer() if self.submit_reviewer else SUBMIT_CHECK_MESSAGE
+                if self.submit_reviewer:
+                    output["output"] = self.submit_reviewer()
+                else:
+                    output["output"] = SUBMIT_CHECK_MESSAGE + (self.submit_notes() if self.submit_notes else "")
                 return
             submission = "".join(lines[1:])
             raise Submitted(
@@ -338,6 +344,9 @@ class HarborSyncedAgent(DefaultAgent):
         self.time_limit_sec: float | None = None
         self.extra_template_vars["time_limit_min"] = None
         self.review: dict | None = None
+        self.change_report = False
+        self._snapshot: tuple | None = None  # (files, git) at task start
+        self.change_counts: dict | None = None
 
     def query(self) -> dict:
         if self._stop.is_set():
@@ -375,6 +384,37 @@ class HarborSyncedAgent(DefaultAgent):
             self.nudged_at_sec = elapsed
             text += NUDGE_MESSAGE
         return text
+
+    def run(self, task: str = "", **kwargs) -> dict:
+        if self.change_report:
+            dirs = changes.candidate_dirs(task)
+            snapshot = self._take_snapshot(dirs)
+            self._snapshot = (dirs, *snapshot) if snapshot else None
+        return super().run(task, **kwargs)
+
+    def _take_snapshot(self, dirs: list[str]) -> tuple | None:
+        """(files, git) for the dirs (changes.py). None on any failure or too many files: no report then."""
+        try:
+            files = changes.parse_snapshot(
+                self.env.execute({"command": changes.snapshot_command(dirs)}, timeout=60, check=False)["output"]
+            )
+            git = changes.parse_git(self.env.execute({"command": changes.git_command(dirs)}, timeout=60, check=False)["output"])
+            return (files, git) if files is not None else None
+        except Exception:
+            return None
+
+    def change_notes(self) -> str:
+        """Appended to the submit checklist: what changed since the start snapshot. Never raises."""
+        if not self._snapshot:
+            return ""
+        dirs, before, git_before = self._snapshot
+        snapshot = self._take_snapshot(dirs)
+        if not snapshot:
+            return ""
+        after, git_after = snapshot
+        self.change_counts = changes.counts(before, after, git_before, git_after)
+        self._sync_context()
+        return changes.report(before, after, git_before, git_after)
 
     def submit_review(self) -> str:
         """Runs the fresh-context reviewer (review.py); its tokens count like the agent's."""
@@ -442,6 +482,8 @@ class HarborSyncedAgent(DefaultAgent):
             "review_sec": (self.review or {}).get("seconds"),
             "time_limit_sec": self.time_limit_sec,
             "reasoning_effort": getattr(self.model, "reasoning_effort", None),
+            "change_report": self.change_report,
+            "change_counts": self.change_counts,
         }
         if self.compactor:
             ctx.metadata["compactions"] = self.compactor.log
@@ -590,6 +632,9 @@ class BadgerMiniAgent(BaseAgent):
         agent.time_awareness = _switch("AGENT_TIME_AWARENESS")
         agent.extra_template_vars["time_awareness"] = agent.time_awareness
         agent.extra_template_vars["no_benchmark_lookup"] = _switch("AGENT_NO_BENCHMARK_LOOKUP")
+        if _switch("AGENT_CHANGE_REPORT", default="off"):
+            agent.change_report = True
+            env.submit_notes = agent.change_notes
         if _switch("AGENT_SUBMIT_REVIEW", default="off"):
             env.submit_check = True  # the review uses the submit check's hold on the first submit
             env.submit_reviewer = agent.submit_review
