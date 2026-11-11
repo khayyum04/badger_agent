@@ -110,7 +110,7 @@ def summarize_trial(trial_dir: Path) -> dict | None:
     }
     for key in ("thinking_cap", "time_awareness", "strip_reasoning", "n_boosted_calls", "nudged_at_sec",
                 "submit_check", "submit_checked_at_sec", "no_benchmark_lookup",
-                "overrun_recovery", "n_overrun_notes", "n_thinking_off_calls", "thinking_off_rejected",
+                "overrun_recovery", "n_overrun_notes", "n_thinking_off_calls", "thinking_off_rejected", "thinking_off_after",
                 "submit_review", "review_commands", "review_sec", "time_limit_sec", "reasoning_effort",
                 "change_report", "change_counts"):
         if key in metadata:

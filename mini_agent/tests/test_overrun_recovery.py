@@ -11,6 +11,7 @@ from badger_mini.harbor_agent import (
     BadgerLitellmModel,
     _load_config,
     _reasoning_effort,
+    _thinking_off_after,
     _switch,
 )
 
@@ -192,3 +193,37 @@ def test_reasoning_effort_typo_fails_loudly(monkeypatch):
     monkeypatch.setenv("AGENT_REASONING_EFFORT", "lwo")
     with pytest.raises(ValueError):
         _reasoning_effort()
+
+
+def test_thinking_off_after_one_overrun(calls):
+    """AGENT_OVERRUN_THINKING_OFF_AFTER=1: only the reply right after an overrun goes out with thinking off."""
+    sent, script = calls
+    script += [
+        response("length", "a"),
+        response("tool_calls", tool_call=True),  # thinking off, acts on the notes
+        response("tool_calls", tool_call=True),  # thinking back on
+        response("length", "b"),
+        response("tool_calls", tool_call=True),  # thinking off again
+    ]
+    model = make_model(recovery=True)
+    model.thinking_off_after = 1
+    results = [query(model) for _ in range(5)]
+    assert [thinking_off(k) for k in sent] == [False, True, False, False, True]
+    assert model.n_thinking_off_calls == 2 and model.n_overrun_notes == 2
+    assert results[1]["extra"]["actions"][0]["command"] == "ls"
+
+
+@pytest.mark.parametrize("value, expected", [(None, 2), ("", 2), ("1", 1), (" 3 ", 3)])
+def test_thinking_off_after_setting(monkeypatch, value, expected):
+    if value is None:
+        monkeypatch.delenv("AGENT_OVERRUN_THINKING_OFF_AFTER", raising=False)
+    else:
+        monkeypatch.setenv("AGENT_OVERRUN_THINKING_OFF_AFTER", value)
+    assert _thinking_off_after() == expected
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "one", "1.5"])
+def test_thinking_off_after_bad_value_fails_loudly(monkeypatch, value):
+    monkeypatch.setenv("AGENT_OVERRUN_THINKING_OFF_AFTER", value)
+    with pytest.raises(ValueError):
+        _thinking_off_after()
