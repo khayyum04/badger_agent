@@ -1,0 +1,29 @@
+# More-time probe: the 24 tasks that timed out (and failed) at least once in full-all-v1/v2/v3.
+# Run with AGENT_MAX_TURNS=200 and --agent-timeout-multiplier 2; compare with v1-v3 on the same tasks.
+# Columns: timed-out-and-failed / passed, across the 3 runs.
+# Passed at least once in v1-v3 (the 15 that can flip)
+adaptive-rejection-sampler        # 2 / 1
+regex-chess                       # 2 / 1
+tune-mjcf                         # 2 / 1
+overfull-hbox                     # 2 / 1
+gcode-to-text                     # 2 / 1
+winning-avg-corewars              # 1 / 1
+code-from-image                   # 1 / 1
+password-recovery                 # 1 / 2
+path-tracing                      # 1 / 2
+chess-best-move                   # 1 / 1
+largest-eigenval                  # 1 / 2
+feal-differential-cryptanalysis   # 1 / 2
+polyglot-c-py                     # 1 / 1
+train-fasttext                    # 1 / 1
+path-tracing-reverse              # 1 / 1
+# Never passed in v1-v3
+polyglot-rust-c                   # 1 / 0
+make-doom-for-mips                # 3 / 0
+extract-moves-from-video          # 3 / 0
+caffe-cifar-10                    # 3 / 0
+make-mips-interpreter             # 3 / 0
+gpt2-codegolf                     # 3 / 0
+write-compressor                  # 3 / 0
+qemu-startup                      # 3 / 0  (grading broken: can never pass)
+qemu-alpine-ssh                   # 2 / 0  (grading broken: can never pass)

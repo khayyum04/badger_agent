@@ -16,6 +16,7 @@ The team's main agent: mini-swe-agent (pinned PyPI `2.4.6`) wired into Harbor as
 - `eval/submit_check_subset.txt` — 4 tasks that failed a skipped requirement in every run + 7 controls (`../docs/plans/submit-check.md`).
 - `eval/overrun_subset.txt` — 13 tasks that lose the most time to cut-off replies + 4 controls (`../docs/plans/overrun-recovery.md`).
 - `eval/review_subset.txt`, `eval/time_limit_subset.txt` — A/B lists for the review and the known time limit, with A-side pass counts from `full-all-v1`/`v2`.
+- `eval/timeout_subset.txt` — the 24 tasks that timed out and failed at least once in `full-all-v1`/`v2`/`v3` (15 passed at least once), for the more-time probe (`AGENT_MAX_TURNS=200`, `--agent-timeout-multiplier 2`); see `../docs/research/harness-measurements-nov.md`.
 - `eval/slow_subset.txt` — the 28 tasks that timed out or quit on overruns in `full-mini-v1`, plus 6 thinking-heavy passes as a regression check (`../docs/plans/thinking-cap.md`).
 - `.env.example`, `.env.op.example` — committed templates; real `.env` / `.env.op` are gitignored.
 
