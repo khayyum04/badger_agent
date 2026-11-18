@@ -11,11 +11,11 @@ Build the best open coding agent on a single GPU — no proprietary models, no g
 
 The last two years have transformed how software gets built. Frontier coding agents — Claude Code, Cursor, Codex, Devin — can now read a codebase, plan changes across many files, run tests, and recover from errors well enough to feel like real (if junior) collaborators. They are remarkable, but they are also closed and expensive: every keystroke flows to a third party, costs accumulate per task, and anyone working with sensitive data has to be careful nothing leaks.
 
-Open-weight models have closed enough of the raw-quality gap that a credible coding agent can now plausibly run locally. *Plausibly*, but not yet *well*. The challenge is intended as a collaborative effort to help narrow the remaining gap. You will build an autonomous coding agent on top of an approved open-weight model and measure it on [Terminal-Bench 2.0](https://tbench.ai), an industry-standard 89-task benchmark used to evaluate Claude Code, Cursor, and friends. Every submission runs on one of a handful of approved models in the 7–37 GB class, so the leverage is in the scaffold or "agent harness": a 14B model wrapped in a thoughtful agent loop can credibly beat a 32B with a naive one. The goal is not to build the largest agent, but the most *useful* one under realistic constraints.
+Open-weight models have closed enough of the raw-quality gap that a credible coding agent can now plausibly run locally. *Plausibly*, but not yet *well*. The challenge is intended as a collaborative effort to help narrow the remaining gap. You will build an autonomous coding agent on top of an open-weight model and measure it on [Terminal-Bench 2.0](https://tbench.ai), an industry-standard 89-task benchmark used to evaluate Claude Code, Cursor, and friends. Every submission runs on open weights within the same 96 GB budget, so the leverage is in the scaffold or "agent harness": a 14B model wrapped in a thoughtful agent loop can credibly beat a 32B with a naive one. The goal is not to build the largest agent, but the most *useful* one under realistic constraints.
 
 This is an **educational, collaborative challenge**. There are no cash prizes, no rankings-based awards, and no reason to hoard ideas. Share repos early, post findings to the Discussion tab, fork and build on each other's approaches. Credit what you borrowed in your writeup and explain what you added. Every improvement one team publishes raises the floor for everyone else — and every step forward here pushes the open-source community closer to genuine independence from closed frontier tools when it comes to agentic coding.
 
-**Soft launch.** The competition is open for submissions now; the official kickoff for UW–Madison participants is September 2026. Between now and then, the approved model list and rules may be adjusted — nothing drastic is planned, and any change will be announced in the Discussion tab. Early submissions are welcome; if a change affects your entry, you can simply resubmit.
+**Soft launch.** The competition is open for submissions now; the official kickoff for UW–Madison participants is September 2026. Between now and then, the model rule and scoring may be adjusted (they have been: see Models and Evaluation) — nothing drastic is planned, and any change will be announced in the Discussion tab. Early submissions are welcome; if a change affects your entry, you can simply resubmit.
 
 
 
@@ -36,8 +36,8 @@ Build an autonomous coding agent, running entirely on open-weight models, that:
 
 - **Solves real software engineering tasks end-to-end** without human intervention — reading the problem, exploring the codebase, planning, executing, and verifying the result.
 - **Generalizes** across Terminal-Bench's diverse task categories rather than memorizing solutions to individual tasks.
-- **Runs efficiently** — modest memory footprint, lean token consumption — without sacrificing capability. Use one of the approved models below (roughly 7–37 GB reported VRAM) so the competition is about the scaffold, not model shopping.
-- **Beats the leaderboard** — scored by Terminal-Bench performance minus a small token penalty, on an approved open-weight model (see [Evaluation](#evaluation)).
+- **Runs efficiently** — modest memory footprint, lean token consumption — without sacrificing capability. Use open weights within the 96 GB budget, so everyone works under the same memory ceiling.
+- **Beats the leaderboard** — scored by Terminal-Bench performance minus a small token penalty, on open weights within the 96 GB budget (see [Evaluation](#evaluation)).
 
 ### Terminal-Bench
 
@@ -71,21 +71,21 @@ The [challenge repo](https://github.com/qualiaMachine/MLM26_EfficientCoder) has 
 
 ---
 
-## Approved models
+## Models
 
-Submissions must use one of the models below. The list is deliberately short so the competition is about how you build the scaffold, not which model you found. Scoring is Terminal-Bench score minus a small token penalty — see the Evaluation section below.
+**Rule (Kaggle Evaluation page):** your submitted run must use open weights within the 96 GB budget — any checkpoint, any vendor, 4-bit or higher. The table below lists well-tested options, not an exclusive list. Scoring is Terminal-Bench score minus a small, capped token penalty — see the Evaluation section below.
 
-Development is unrestricted — prototype against any open-weight model or endpoint you like. The approved list governs the *submitted* run only.
+Development is unrestricted — prototype against any open-weight model or endpoint you like. The rule governs the *submitted* run only.
 
 **Pick by your GPU:** 8–12 GB → 7B AWQ · 16 GB → 14B AWQ · 24 GB → `qwen3-coder:30b` GGUF · 32–40 GB → 32B AWQ or 30B FP8 · 48 GB+ → the anchor.
 
 | Model | FP8 | AWQ / 4-bit | Notes |
 |---|---|---|---|
-| Qwen3.6-27B | `Qwen/Qwen3.6-27B-FP8` (37 GB) | — none published | **Anchor.** Newest and strongest of the group; reasoning model with coder tool-calling. Self-host on a 48 GB card, or UW–Madison participants can use the hosted endpoint in [`starter/docs/uw_madison_endpoint.md`](https://github.com/qualiaMachine/MLM26_EfficientCoder/blob/main/starter/docs/uw_madison_endpoint.md). |
+| Qwen3.8-27B | `Qwen/Qwen3.8-27B-FP8` (~37 GB) | — none published | **Anchor; our model.** Newest and strongest of the group; reasoning model. Self-host on a 48 GB card, or UW–Madison participants can use the hosted gateway (`qwen3.8-27b`, allowed for the submitted run) in [`starter/docs/uw_madison_endpoint.md`](https://github.com/qualiaMachine/MLM26_EfficientCoder/blob/main/starter/docs/uw_madison_endpoint.md). |
 | Qwen3-Coder-30B-A3B | `Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8` (35 GB) | `qwen3-coder:30b`, Ollama GGUF Q4_K_M (22 GB) — no official 4-bit safetensors exists | MoE: 30B total, ~3B active — fast. The GGUF runs on 24 GB cards, workable on 16 GB via expert offload. Bedrock's managed `qwen.qwen3-coder-30b-a3b-v1:0` counts as the FP8 column. |
 | Qwen2.5-Coder-32B | — | `Qwen/Qwen2.5-Coder-32B-Instruct-AWQ` (28 GB) | A generation older but the most widely hosted (Together, Fireworks, NVIDIA API catalog) — easiest no-GPU path. |
 | Qwen2.5-Coder-14B | — | `Qwen/Qwen2.5-Coder-14B-Instruct-AWQ` (15 GB) | Small-GPU tier (16 GB+ cards). |
-| Qwen2.5-Coder-7B | — | `Qwen/Qwen2.5-Coder-7B-Instruct-AWQ` (9 GB) | Smallest approved; runs almost anywhere, expect a lower score ceiling. |
+| Qwen2.5-Coder-7B | — | `Qwen/Qwen2.5-Coder-7B-Instruct-AWQ` (9 GB) | Smallest listed; runs almost anywhere, expect a lower score ceiling. |
 
 **Equivalent quantizations count as the same entry.** GGUF/Q4_K_M (Ollama) and GPTQ-Int4 checkpoints of a listed model map to its AWQ / 4-bit column; they're within ~10% of each other. Ollama's `qwen2.5-coder:7b/14b/32b` tags are the corresponding AWQ entries.
 
@@ -101,21 +101,17 @@ Reported VRAM (GB) ≈ published checkpoint size                               #
 
 For **MoE models**, the full checkpoint loads into VRAM — active params reduce compute, not memory.
 
-### Requesting an addition
-
-The list is meant to stay short, but it isn't frozen. If a model materially changes what's possible for participants (a new open-weight coder release, a hardware tier the list doesn't serve), post in the **Kaggle Discussion tab** with the HuggingFace id, the quantization, and the case for adding it. Additions should land at or under ~48 GB reported VRAM — a single serious GPU. Organizers respond within a day or two; once listed, the model is available to every team.
-
 ### Considerations
 
-**Models.** Your submitted run must use one of the approved models above.
+**Models.** Your submitted run must use open weights within the 96 GB budget — any checkpoint, any vendor, 4-bit or higher.
 
 **What's not eligible:**
 - **Closed-weight models** (GPT, Claude, Gemini) anywhere in your system, including "just the planner."
-- **Any endpoint that won't tell you what it's serving.** If a provider doesn't disclose the exact `(model, quantization)` behind their API, you can't pin your submission to an approved checkpoint. Fine for prototyping, but your submitted run needs to use a listed model on an endpoint that names it.
+- **Any endpoint that won't tell you what it's serving.** If a provider doesn't disclose the exact `(model, quantization)` behind their API, you can't pin your submission to a checkpoint. Fine for prototyping, but your submitted run needs an endpoint that names its checkpoint and quantization.
 
 **Evaluation constraints:**
 - **No human-in-the-loop at evaluation time.** Terminal-Bench scoring is fully deterministic — pytest passes or fails, no LLM judges, no subjective grading.
-- **No hard turn cap.** Set whatever per-task turn / wall-clock limit suits your dev loop. The token penalty (0.01 per million) already charges verbose agents, so no cap is needed.
+- **No hard turn cap.** Set whatever per-task turn / wall-clock limit suits your dev loop. The token penalty is capped at 0.01 (see Evaluation), so it barely restrains verbose agents; set limits for your own time and the tasks' time limits.
 
 **Generalizability.** One system prompt, one agent loop, no per-task `if task == "fix-git"` branching. Detecting task *categories* (e.g., "this looks like a debugging task") and adjusting strategy is fine — that's good engineering. Hardcoding solutions or prompts for individual tasks is not. After the deadline, organizers re-run the top 5 submissions and review the code; task-specific hardcoding disqualifies.
 
@@ -140,16 +136,16 @@ model: Qwen/Qwen2.5-Coder-32B-Instruct-AWQ
 quantization: AWQ 4-bit
 tb_score: 0.42
 total_tokens: 1263800
-leaderboard_score: 0.407
+leaderboard_score: 0.41999
 gpu: RTX A6000 48 GB
 mean_wallclock_per_task: 3m 12s
 ```
 
 - `code_url` — your public repo at the exact tag or commit SHA you ran (see below)
-- `model` and `quantization` — must match an approved entry; quantization is `FP8`, `AWQ 4-bit`, or `GGUF Q4_K_M`
+- `model` and `quantization` — the open-weight checkpoint you ran and its quantization (4-bit or higher), within the 96 GB budget
 - `tb_score` — mean reward across all 89 tasks, 0–1
 - `total_tokens` — `n_input_tokens + n_output_tokens` summed from Harbor's `result.json`
-- `leaderboard_score` — `tb_score − 0.01 × (total_tokens / 1,000,000)`
+- `leaderboard_score` — `tb_score − min(0.01, 0.01 × (total_tokens / 89) / 100,000,000)`
 - `gpu` and `mean_wallclock_per_task` — informational, not scored
 
 **Getting your `code_url`.** It pins the exact version of your code you ran, so organizers can reconstruct it with `git clone` + `git checkout`. Commit and push everything, then either:
@@ -176,19 +172,21 @@ There are no cash or material awards — this is a non-monetary educational chal
 
 ### Scoring
 
-Your submitted run must use one of the `(model, quantization)` checkpoints in the approved model table above. Equivalent quantizations of a listed model (GGUF/Q4_K_M, GPTQ-Int4) count as its AWQ / 4-bit entry. The approved-model list plus the token penalty is what makes this a scaffold-engineering challenge: everyone picks from the same small pool of models, and the ranking rewards whoever gets the most out of it.
+Your submitted run must use open weights within the 96 GB budget — any checkpoint, any vendor, 4-bit or higher. The shared budget plus the token penalty is what keeps the comparison honest: everyone works under the same memory ceiling, and the ranking rewards whoever gets the most out of it — through model choice, through the scaffold, and through not wasting tokens.
 
 **Score.**
 
 ```
-leaderboard_score = TB_score − 0.01 × (total_tokens / 1,000,000)
+tokens_per_task   = total_tokens / 89
+token_penalty     = min(0.01, 0.01 * tokens_per_task / 100,000,000)
+leaderboard_score = TB_score - token_penalty
 ```
 
 Where:
 - **`TB_score`** is your mean Terminal-Bench reward across all 89 tasks (single attempt per task, `--n-attempts 1`) — a value between 0 and 1.
 - **`total_tokens`** is the sum of `n_input_tokens + n_output_tokens` across all 89 tasks, taken straight from Harbor's per-task `result.json`.
 
-**Every million tokens costs one point** (0.01) of Terminal-Bench score. A typical run spends 1–3M tokens, so the penalty lands around 0.01–0.03 — enough to decide races between agents of similar capability, never enough to beat a real capability gap. Worked example: TB 0.42 with 1.26M tokens scores `0.42 − 0.0126 = 0.407`; the same agent rerun with a verbose loop at 2.5M tokens drops to `0.395`.
+**The penalty is capped at 0.01, below one solved task (1/89 ≈ 0.0112),** so tokens only break ties between agents with the same pass count. It reaches the cap at 100M tokens per task. Worked example: TB 0.584 with 143.2M total tokens is 1.61M per task, a penalty of `0.01 × 1.61M / 100M = 0.00016`, so `leaderboard_score = 0.58411`. Never trade a solved task for tokens.
 
 ### Computing your submission numbers
 
@@ -211,7 +209,7 @@ find "$JOB" -mindepth 2 -name result.json | xargs jq -s '
 find "$JOB" -mindepth 2 -name result.json | wc -l
 ```
 
-These three numbers, plus your approved model entry, are what go on the submission card in your Writeup (see [Submission Requirements](#submission-requirements) above).
+These three numbers, plus your model and quantization, are what go on the submission card in your Writeup (see [Submission Requirements](#submission-requirements) above).
 
 ### Verification of top submissions
 
@@ -231,14 +229,14 @@ Ranking is by **leaderboard score**, computed from the submission card in your W
 
 | Criteria | Points possible |
 |---|---|
-| Leaderboard score × 100, where `leaderboard_score = tb_score − 0.01 × (total_tokens / 1,000,000)` | 0–100 |
+| Leaderboard score × 100, where `leaderboard_score = tb_score − min(0.01, 0.01 × (total_tokens / 89) / 100,000,000)` | 0–100 |
 
 **Required elements (all must pass; any "No" makes the submission ineligible)**
 
 | Requirement | Pass/Fail |
 |---|---|
 | Submission card at the top of the Writeup, fully filled out | Yes/No |
-| Model + quantization on the approved model list | Yes/No |
+| Open weights within the 96 GB budget, 4-bit or higher | Yes/No |
 | Agent runs via `harbor run --agent` without modification | Yes/No |
 | Open weights only (no closed-weight or opaque-provider API calls) | Yes/No |
 | All 89 Terminal-Bench tasks evaluated, single attempt each | Yes/No |

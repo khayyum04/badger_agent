@@ -14,16 +14,16 @@ model: Qwen/Qwen2.5-Coder-32B-Instruct-AWQ
 quantization: AWQ 4-bit
 tb_score: 0.42
 total_tokens: 1263800
-leaderboard_score: 0.407
+leaderboard_score: 0.41999
 gpu: RTX A6000 48 GB
 mean_wallclock_per_task: 3m 12s
 ```
 
 - `code_url` — your public repo at the exact tag or commit SHA you ran (see below)
-- `model` and `quantization` — must match an approved entry; quantization is `FP8`, `AWQ 4-bit`, or `GGUF Q4_K_M`
+- `model` and `quantization` — the open-weight checkpoint you ran and its quantization (4-bit or higher), within the 96 GB budget
 - `tb_score` — mean reward across all 89 tasks, 0–1
 - `total_tokens` — `n_input_tokens + n_output_tokens` summed from Harbor's `result.json`
-- `leaderboard_score` — `tb_score − 0.01 × (total_tokens / 1,000,000)`
+- `leaderboard_score` — `tb_score − min(0.01, 0.01 × (total_tokens / 89) / 100,000,000)`
 - `gpu` and `mean_wallclock_per_task` — informational, not scored
 
 Also add a **cover image** — Kaggle requires one to submit a Writeup; a screenshot of your `harbor view jobs` results works. Full details in the Submission Requirements section of the competition page.
@@ -38,7 +38,7 @@ The sections below are a starting point if a blank page is unhelpful:
 
 ### 2. Architecture
 
-> How your scaffold works. Walk through one task's lifecycle: what the model sees in its first prompt, how responses are parsed into commands, how the conversation/context is managed as turns accumulate, how errors are handled, and how the agent decides it's done. Name your approved model checkpoint and any serving details that matter (quantization, context length, sampling). A diagram is welcome but not required.
+> How your scaffold works. Walk through one task's lifecycle: what the model sees in its first prompt, how responses are parsed into commands, how the conversation/context is managed as turns accumulate, how errors are handled, and how the agent decides it's done. Name your model checkpoint and any serving details that matter (quantization, context length, sampling). A diagram is welcome but not required.
 
 ### 3. What we tried
 

@@ -90,7 +90,7 @@ Expect `Mean: 1.000` with 0 exceptions (or `0.900` — the sample task `build-cy
 
    If you already have a `starter/.env` from the template, comment out or delete those three lines.
 
-`LLM_MODEL` lives in `.env.op` (not secret, but it must match the server exactly). The template's value is fine for development; confirm the model is an approved one before any submission run.
+`LLM_MODEL` lives in `.env.op` (not secret, but it must match the server exactly). The template's value is fine for development; before a submission run, confirm the model is open weights within the 96 GB budget (`qwen3.8-27b` is).
 
 ## Verify the connection
 

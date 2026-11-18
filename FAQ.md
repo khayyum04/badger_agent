@@ -4,16 +4,16 @@
 No. If part of your system calls GPT, Claude, or Gemini, it's out of scope.
 
 **Can I use Amazon Bedrock?**
-Narrowly, yes. The fully-managed pay-per-token `qwen3-coder-30b-a3b` counts as the approved `Qwen3-Coder-30B-A3B-Instruct-FP8` entry (AWS doesn't officially state serving precision; FP8 assumed, corrected if AWS confirms otherwise). Bedrock's other models aren't on the approved list. **Bedrock Custom Model Import** is not viable (Provisioned-Throughput-only at $21–50/hr with a 1- or 6-month commit). If you want AWS for self-hosting, rent an EC2 or SageMaker GPU instance and self-host with vLLM — that's just cloud compute, fine like any other rented GPU. **But be extremely careful with costs:** GPU instances run $1–5+/hr and bill while idle, so a forgotten instance over a weekend is a three-figure surprise. Set a billing alarm before launching anything, stop instances the moment a run finishes, and consider the flat-rate marketplaces (Lambda, RunPod, Vast.ai) first — they're cheaper for this and easier to reason about.
+Narrowly, yes. The fully-managed pay-per-token `qwen3-coder-30b-a3b` counts as `Qwen3-Coder-30B-A3B-Instruct-FP8` (AWS doesn't officially state serving precision; FP8 assumed, corrected if AWS confirms otherwise). Other Bedrock models are fine only if they are open weights within the 96 GB budget and Bedrock names the exact checkpoint. **Bedrock Custom Model Import** is not viable (Provisioned-Throughput-only at $21–50/hr with a 1- or 6-month commit). If you want AWS for self-hosting, rent an EC2 or SageMaker GPU instance and self-host with vLLM — that's just cloud compute, fine like any other rented GPU. **But be extremely careful with costs:** GPU instances run $1–5+/hr and bill while idle, so a forgotten instance over a weekend is a three-figure surprise. Set a billing alarm before launching anything, stop instances the moment a run finishes, and consider the flat-rate marketplaces (Lambda, RunPod, Vast.ai) first — they're cheaper for this and easier to reason about.
 
-**The model I want isn't on the approved list. What do I do?**
-The list is deliberately short — the competition is about the scaffold, not model shopping. If you think a model materially changes what's possible (a new open-weight coder release, a hardware tier the list doesn't serve), post the case in the Kaggle Discussion tab with the HuggingFace link and quantization. Organizers respond within a day or two.
+**The model I want isn't in the README's model table. Can I use it?**
+Yes, if it is open weights within the 96 GB budget — any checkpoint, any vendor, 4-bit or higher. The table lists well-tested options, not an exclusive list.
 
 **Can I fine-tune a model for this?**
-Yes, if the base is an approved model. The fine-tune counts as its base model's entry. Document it in the writeup; weights must be either public or reproducible from the public base + your published LoRA/adapter.
+Yes, if the base is open weights and the result fits the 96 GB budget. Document it in the writeup; weights must be either public or reproducible from the public base + your published LoRA/adapter.
 
 **Can I use multiple models (e.g., a small planner + a larger coder)?**
-Yes, as long as every model involved is on the approved list. The submission card carries the largest model's entry; token counts sum across all models, and you should be ready to defend the setup when your submission is verified.
+Yes, as long as every model involved is open weights. How the 96 GB budget applies to several models together isn't stated here; check the Kaggle Evaluation page. The submission card carries the largest model; token counts sum across all models, and you should be ready to defend the setup when your submission is verified.
 
 **Can I submit my agent to the public Terminal-Bench leaderboard?**
 Yes, please. It's independent of this challenge — a real leaderboard and a real artifact.
@@ -25,7 +25,7 @@ No — work with whatever subset is useful for debugging. For the leaderboard, y
 Both fine. Teams of 1–5. Reflect honestly on contributions in the writeup.
 
 **I don't have a GPU.**
-See [RESOURCES.md](https://github.com/qualiaMachine/MLM26_EfficientCoder/blob/main/RESOURCES.md) — NVIDIA's API catalog and the other hosted endpoints listed there work for development without local hardware. Whatever model you finally submit must be on the [approved list](https://www.kaggle.com/competitions/OpenAgent-Coding/overview).
+See [RESOURCES.md](https://github.com/qualiaMachine/MLM26_EfficientCoder/blob/main/RESOURCES.md) — NVIDIA's API catalog and the other hosted endpoints listed there work for development without local hardware. Whatever model you finally submit must be open weights within the 96 GB budget, 4-bit or higher ([competition page](https://www.kaggle.com/competitions/OpenAgent-Coding/overview)).
 
 **I'm not at UW–Madison.**
 Welcome. The challenge is fully open. You won't have access to the UW–Madison-only compute in [RESOURCES.md](https://github.com/qualiaMachine/MLM26_EfficientCoder/blob/main/RESOURCES.md), but the leaderboard is the leaderboard — you compete on equal footing.
