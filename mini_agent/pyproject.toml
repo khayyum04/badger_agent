@@ -13,6 +13,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+# Optional: badger_mini.langfuse_export (job summaries to Langfuse). The agent never imports it.
+tracing = ["langfuse==5.1.0"]
 
 [build-system]
 requires = ["setuptools>=68"]

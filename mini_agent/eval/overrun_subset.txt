@@ -1,0 +1,22 @@
+# Overrun recovery (docs/plans/overrun-recovery.md): 13 tasks that lose the most time to cut-off replies
+# in full-mini-v1 / full-capta-v1 (# = passes across the 6 recent mini_agent runs), plus 4 controls.
+# Targets, sometimes pass
+feal-linear-cryptanalysis         # 3/6
+feal-differential-cryptanalysis   # 4/6
+circuit-fibsqrt                   # 3/6
+schemelike-metacircular-eval      # 3/6
+chess-best-move                   # 1/4
+regex-log                         # 5/6
+# Targets, never pass
+regex-chess                       # 0/6
+write-compressor                  # 0/6
+winning-avg-corewars              # 0/6
+dna-assembly                      # 0/4
+adaptive-rejection-sampler        # 0/4
+path-tracing-reverse              # 0/6
+gpt2-codegolf                     # 0/4
+# Controls: always pass, thinking-heavy; must still pass
+portfolio-optimization            # 6/6
+custom-memory-heap-crash          # 6/6
+prove-plus-comm                   # 4/4
+distribution-search               # 4/4

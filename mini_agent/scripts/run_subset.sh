@@ -11,5 +11,5 @@ while IFS= read -r line; do
   [ -n "$line" ] && include_flags+=(-i "$line")
 done < "$SUBSET_FILE"
 [ ${#include_flags[@]} -gt 0 ] || { echo "error: no task names in $SUBSET_FILE" >&2; exit 1; }
-harbor run -d terminal-bench@2.0 --agent "$AGENT" "${include_flags[@]}" \
+run_harbor -d terminal-bench@2.0 --agent "$AGENT" "${include_flags[@]}" \
   -n "${N_CONCURRENT:-2}" --jobs-dir jobs "$@"

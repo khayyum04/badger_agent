@@ -1,0 +1,17 @@
+# Submit check (AGENT_SUBMIT_CHECK, docs/plans/submit-check.md): 4 tasks that failed on a skipped
+# requirement despite a correct answer, plus 7 controls that passed in both full-mini-v1 and full-capta-v1.
+
+# Targets: failed the same way in every run
+polyglot-c-py                 # left a compiled test binary next to main.py.c (5 of 5 runs)
+polyglot-rust-c               # same, cmain + main next to main.rs
+sanitize-git-repo             # rewrote git history; the test looks up an original commit (2 of 2)
+financial-document-processor  # left the original documents in place once (full-mini-v1)
+
+# Controls: must still pass. Build outputs the tests need, git work, files the task creates.
+build-pmars
+sqlite-with-gcov
+pytorch-model-cli
+kv-store-grpc
+fix-git
+git-multibranch
+openssl-selfsigned-cert
