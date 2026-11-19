@@ -114,6 +114,21 @@ SUBMIT_CHECK_MESSAGE = """Not submitted yet: one final check first (this happens
 Fix anything that fails. Then submit again with: echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"""
 
 
+# Command output cap: the model only sees the first and last 5,000 characters (observation_template), but
+# mini-swe-agent keeps the whole output in memory and in the trajectory (extra.raw_output), re-saved every
+# step. A command that printed a raw ISO in probe-moretime-v1 (qemu-alpine-ssh) made a 1.2 GB trajectory.
+OUTPUT_CAP_CHARS = 1_000_000
+OUTPUT_CAP_MARKER = "\n[... {dropped:,} characters of output dropped by the harness ...]\n"
+
+
+def _cap_output(text: str) -> tuple[str, bool]:
+    """Keep the first and last OUTPUT_CAP_CHARS // 2 characters of an over-long output."""
+    if len(text) <= OUTPUT_CAP_CHARS:
+        return text, False
+    half = OUTPUT_CAP_CHARS // 2
+    return text[:half] + OUTPUT_CAP_MARKER.format(dropped=len(text) - 2 * half) + text[-half:], True
+
+
 class HarborEnvironmentConfig(BaseModel):
     timeout: int = 180
     """Per-command timeout (s). Enforced in the container so partial output survives a timeout."""
@@ -133,6 +148,8 @@ class HarborEnvironment:
         self.submit_check = False
         self.submit_checked_at: float | None = None
         """time.time() of the held-back first submit; None until then."""
+        self.n_capped_outputs = 0
+        """Command outputs cut to OUTPUT_CAP_CHARS."""
 
     submit_reviewer: Any = None  # callable returning the message for a held-back submit (AGENT_SUBMIT_REVIEW)
     submit_notes: Any = None  # callable returning text appended to the checklist (AGENT_CHANGE_REPORT)
@@ -160,8 +177,10 @@ class HarborEnvironment:
         )
         try:
             result = future.result()
+            text, capped = _cap_output((result.stdout or "") + (result.stderr or ""))
+            self.n_capped_outputs += capped
             output = {
-                "output": (result.stdout or "") + (result.stderr or ""),
+                "output": text,
                 "returncode": result.return_code,
                 "exception_info": "",
             }
@@ -487,6 +506,7 @@ class HarborSyncedAgent(DefaultAgent):
             "reasoning_effort": getattr(self.model, "reasoning_effort", None),
             "change_report": self.change_report,
             "change_counts": self.change_counts,
+            "n_capped_outputs": getattr(self.env, "n_capped_outputs", 0),
         }
         if self.compactor:
             ctx.metadata["compactions"] = self.compactor.log
