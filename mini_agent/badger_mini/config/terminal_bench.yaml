@@ -72,7 +72,7 @@ agent:
     ```bash
     nl -ba filename.py | sed -n '10,40p'
     ```
-  step_limit: 100
+  step_limit: 200  # 100 -> 200 with 2x time (full-moretime-v1, docs/research/full-moretime-v1.md)
   cost_limit: 0  # cost is unknown for self-hosted models; token usage is tracked by Harbor instead
   max_consecutive_format_errors: 5
 environment:
