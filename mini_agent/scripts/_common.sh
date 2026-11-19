@@ -2,6 +2,8 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 AGENT="badger_mini.harbor_agent:BadgerMiniAgent"
+# The run_*.sh scripts pass --agent-timeout-multiplier ${AGENT_TIMEOUT_MULTIPLIER:-2}: twice each task's time
+# limit, allowed by the organizers (Nov 18). A later --agent-timeout-multiplier in "$@" wins.
 command -v harbor >/dev/null || { echo "harbor not found: source .venv/bin/activate (repo root)" >&2; exit 1; }
 [ -n "${LLM_API_KEY:-}" ] || echo "warning: LLM_API_KEY not set — launch via: op run --env-file=mini_agent/.env.op -- $0 ..." >&2
 

@@ -6,4 +6,4 @@
 source "$(dirname "$0")/_common.sh"
 TASK="${1:-}"; [ $# -gt 0 ] && shift
 run_harbor -d terminal-bench-sample@2.0 --agent "$AGENT" ${TASK:+-i "$TASK"} \
-  -n "${N_CONCURRENT:-1}" --jobs-dir jobs "$@"
+  -n "${N_CONCURRENT:-1}" --jobs-dir jobs --agent-timeout-multiplier "${AGENT_TIMEOUT_MULTIPLIER:-2}" "$@"

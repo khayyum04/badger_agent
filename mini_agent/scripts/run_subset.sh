@@ -12,4 +12,4 @@ while IFS= read -r line; do
 done < "$SUBSET_FILE"
 [ ${#include_flags[@]} -gt 0 ] || { echo "error: no task names in $SUBSET_FILE" >&2; exit 1; }
 run_harbor -d terminal-bench@2.0 --agent "$AGENT" "${include_flags[@]}" \
-  -n "${N_CONCURRENT:-2}" --jobs-dir jobs "$@"
+  -n "${N_CONCURRENT:-2}" --jobs-dir jobs --agent-timeout-multiplier "${AGENT_TIMEOUT_MULTIPLIER:-2}" "$@"
